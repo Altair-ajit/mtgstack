@@ -9,12 +9,12 @@ description = "Tag-based Magic: The Gathering collection manager with a marker-b
 requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.110", "uvicorn>=0.29", "python-multipart", "httpx>=0.27", "ijson>=3.2", "rapidfuzz>=3.6",
-  "opencv-python-headless>=4.8", "numpy", "pillow", "pytesseract>=0.3.10", "imagehash>=4.3",
+  "opencv-python-headless>=4.8", "numpy", "pytesseract>=0.3.10",
   "cryptography>=41",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pillow", "pytest"]
 
 [project.scripts]
 mtgstack = "mtgstack.cli:main"

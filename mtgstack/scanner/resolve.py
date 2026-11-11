@@ -7,6 +7,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from ..catalog import PRINTED_LANG, Catalog
@@ -260,10 +261,10 @@ class Scanner:
         if not url:
             return None
         try:
-            import imagehash
-            from PIL import Image
             data = fetch_image(url)
-            img = np.array(Image.open(io.BytesIO(data)).convert("RGB"))[:, :, ::-1]
+            img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+            if img is None:
+                return None
             ref = detect.warp(img, corners=np.array([[0, 0], [img.shape[1] - 1, 0],
                                                      [img.shape[1] - 1, img.shape[0] - 1], [0, img.shape[0] - 1]],
                                                     np.float32))

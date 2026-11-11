@@ -21,9 +21,36 @@ from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
-import pytesseract
+
+try:
+    import pytesseract
+except ImportError:          # browser build: OCR comes from set_ocr_backend()
+    pytesseract = None
 
 from .detect import border_band, crop
+
+
+_OCR_BACKEND = None
+
+
+def set_ocr_backend(fn) -> None:
+    """Replace the local tesseract binary: fn(png_bytes, psm) -> Tesseract TSV text (the phone build uses
+    Tesseract compiled to WebAssembly)."""
+    global _OCR_BACKEND
+    _OCR_BACKEND = fn
+
+
+def _tsv_to_dict(tsv: str) -> dict:
+    cols = ["level", "page_num", "block_num", "par_num", "line_num", "word_num", "left", "top", "width", "height",
+            "conf", "text"]
+    d = {c: [] for c in cols}
+    for line in tsv.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 12 or parts[0] == "level":
+            continue
+        for c, v in zip(cols, parts[:11] + ["\t".join(parts[11:])]):
+            d[c].append(v if c == "text" else (float(v) if c == "conf" else int(v)))
+    return d
 
 
 def _find_tesseract() -> None:
@@ -46,7 +73,8 @@ def _find_tesseract() -> None:
             return
 
 
-_find_tesseract()
+if pytesseract is not None:
+    _find_tesseract()
 
 LANGS = "EN|DE|FR|IT|ES|SP|PT|JP|JA|KO|KR|RU|CS|CT|PH"
 RARITY_LETTERS = "CURMSLPTB"
@@ -80,7 +108,11 @@ def _prep_text(img: np.ndarray, scale: int = 3, invert_if_dark: bool = True) -> 
 
 
 def ocr_words(img: np.ndarray, psm: int = 6) -> list[dict]:
-    d = pytesseract.image_to_data(img, config=f"--psm {psm}", output_type=pytesseract.Output.DICT)
+    if _OCR_BACKEND is not None:
+        ok, png = cv2.imencode(".png", img)
+        d = _tsv_to_dict(_OCR_BACKEND(png.tobytes(), psm))
+    else:
+        d = pytesseract.image_to_data(img, config=f"--psm {psm}", output_type=pytesseract.Output.DICT)
     out = []
     for i, t in enumerate(d["text"]):
         if t.strip():
@@ -271,8 +303,26 @@ def border_color(card: np.ndarray) -> tuple[str, dict]:
     return "borderless", stats
 
 
-def art_hash(card: np.ndarray):
-    import imagehash
-    from PIL import Image
-    art = cv2.cvtColor(crop(card, "art"), cv2.COLOR_BGR2RGB)
-    return imagehash.phash(Image.fromarray(art), hash_size=16)
+class PHash:
+    """Perceptual hash (DCT of a downscaled grey image, bits above the median). `a - b` = Hamming distance."""
+
+    def __init__(self, bits: np.ndarray):
+        self.bits = bits.astype(bool).ravel()
+
+    def __sub__(self, other: "PHash") -> int:
+        return int(np.count_nonzero(self.bits != other.bits))
+
+    def __str__(self) -> str:
+        return np.packbits(self.bits).tobytes().hex()
+
+
+def phash(img: np.ndarray, hash_size: int = 16, highfreq: int = 4) -> PHash:
+    g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
+    n = hash_size * highfreq
+    small = cv2.resize(g, (n, n), interpolation=cv2.INTER_AREA).astype(np.float32)
+    low = cv2.dct(small)[:hash_size, :hash_size]
+    return PHash(low > np.median(low))
+
+
+def art_hash(card: np.ndarray) -> PHash:
+    return phash(crop(card, "art"))

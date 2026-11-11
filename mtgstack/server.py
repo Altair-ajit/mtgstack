@@ -511,6 +511,9 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         return res
 
     # ---- web -------------------------------------------------------------------------------
+    app.state.conn = conn
+    if os.environ.get("MTGSTACK_BROWSER"):      # phone build: the page itself is served by GitHub Pages
+        return app
     app.mount("/static", StaticFiles(directory=WEB), name="static")
 
     @app.get("/classic")

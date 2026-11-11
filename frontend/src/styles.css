@@ -336,3 +336,22 @@ button.big, .btn.big { font-size: 16px; padding: 10px 18px; }
   header.top { padding-top: env(safe-area-inset-top); }
   .page { padding-bottom: env(safe-area-inset-bottom); }
 }
+
+/* phone build boot screen */
+#boot { position: fixed; inset: 0; display: grid; place-items: center; background: #0f1e3a; z-index: 1000; }
+.boot-card { display: flex; flex-direction: column; align-items: center; gap: 14px; color: #cbd5e1; text-align: center; padding: 24px; max-width: 320px; }
+.boot-card .logo { font-size: 28px; color: #fff; } .boot-card .logo b { color: #7fb0ff; }
+.boot-card .bad { color: #fca5a5; }
+.spin { width: 28px; height: 28px; border: 3px solid rgba(255,255,255,.2); border-top-color: #7fb0ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.boot-hint { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #0f1e3a; color: #fff; padding: 8px 14px; border-radius: 99px; font-size: 13px; z-index: 900; display: none; }
+/* phones: keep Import and the ⋯ menu on screen; tabs scroll if they don't fit */
+@media (max-width: 600px) {
+  .top { gap: 10px; padding: 0 10px; padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+  .top nav { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .top nav::-webkit-scrollbar { display: none; }
+  .top nav a { white-space: nowrap; }
+  .top-right { flex: none; margin-left: 0; } .top-right .worth { display: none; }
+  .top-right .primary { padding: 6px 10px; }
+  .logo { font-size: 16px; flex: none; }
+}

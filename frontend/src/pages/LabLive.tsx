@@ -5,6 +5,7 @@ import { api, lab } from "../api";
 import type { Finish } from "../api";
 import CardPicker from "../components/CardPicker";
 import PhoneDialog from "../components/PhoneDialog";
+import { LOCAL } from "../local/boot";
 import { useCardCamera } from "../components/useCardCamera";
 import { CardImg, FINISH_LABEL, useToast } from "../ui";
 
@@ -126,7 +127,7 @@ export default function LabLive() {
           <div className="actions">
             <div className="tally"><b>{judged.length}</b> cards · <b className="up">{right}</b> right · <b className="down">{judged.length - right}</b> wrong
               {judged.length > 0 && <> · <b>{Math.round(100 * right / judged.length)}%</b></>}</div>
-            {!onPhone && <button onClick={() => setPhone(true)}>📱 Use your phone</button>}
+            {!onPhone && !LOCAL && <button onClick={() => setPhone(true)}>📱 Use your phone</button>}
             <Link className="btn" to="/lab">Done → Lab</Link>
           </div>
         </div>

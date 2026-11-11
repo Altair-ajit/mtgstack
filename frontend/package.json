@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:pages": "tsc -b && VITE_LOCAL=1 vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -18,11 +19,13 @@
     "react-router-dom": "^7.18.5"
   },
   "devDependencies": {
+    "@tesseract.js-data/eng": "^1.0.0",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "oxlint": "^1.90.0",
+    "tesseract.js-core": "^6.1.2",
     "typescript": "~7.0.2",
     "vite": "^8.3.6"
   }

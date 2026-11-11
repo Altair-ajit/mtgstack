@@ -119,6 +119,9 @@ def main(argv=None):
     x = ps.add_parser("movers"); x.add_argument("--days", type=int, default=7)
     x = ps.add_parser("show"); x.add_argument("printing_id")
 
+    p = sub.add_parser("build-catalog", help="build the phone app's prebuilt card database (CI)")
+    p.add_argument("out"); p.add_argument("--cards", help="card JSON instead of downloading Scryfall bulk data")
+    p.add_argument("--no-cardkingdom", action="store_true")
     p = sub.add_parser("catalog", help="card catalog"); cs = p.add_subparsers(dest="cat_cmd", required=True)
     cs.add_parser("sync", help="download Scryfall bulk data (all printings + prices)")
     x = cs.add_parser("prints"); x.add_argument("name")
@@ -137,6 +140,10 @@ def main(argv=None):
         return
     if args.cmd == "serve":
         return _serve(args)
+    if args.cmd == "build-catalog":
+        from .catalog_build import build
+        build(args.out, args.cards, cardkingdom=not args.no_cardkingdom)
+        return
 
     conn = db.connect(args.db)
     catalog = Catalog(conn, online=not args.offline)

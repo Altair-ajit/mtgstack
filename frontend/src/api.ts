@@ -89,7 +89,10 @@ export interface ImportPreview {
 export interface Summary { cards: number; printings_owned: number; value: number; catalog_printings: number;
   decks: number; building: number; online: boolean }
 export interface CatalogStatus { printings: number; synced_at: string | null;
-  job: { state: "idle" | "running" | "done" | "error"; bytes: number; total: number; cards: number; error: string | null } }
+  job: { state: "idle" | "running" | "done" | "error"; bytes: number; total: number; cards: number; error: string | null };
+  /** phone build only */
+  update_available?: boolean; local_version?: string | null;
+  remote?: { version: string; printings: number; size_gz: number; file: string } | null }
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
   const r = await fetch(path, {

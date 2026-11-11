@@ -202,20 +202,66 @@ SELECT b.*,
 FROM entry_base b;
 """
 
-def connect(path: str | os.PathLike | None = None) -> sqlite3.Connection:
+CATALOG_TABLES = ("printings", "current_prices", "sets")
+
+
+def _split_ddl(sql: str) -> tuple[str, str]:
+    """Split TABLES into (catalog DDL qualified with `cat.`, user DDL) for the two-file layout."""
+    import re
+    cat, user = [], []
+    for stmt in ("\n".join(l for l in s.splitlines() if not l.strip().startswith("--")).strip() for s in sql.split(";")):
+        if not stmt or stmt.startswith("PRAGMA"):
+            continue
+        m = re.match(r"CREATE (?:TABLE|INDEX) IF NOT EXISTS (\w+)(?: ON (\w+))?", stmt)
+        table = (m.group(2) or m.group(1)) if m else ""
+        if table in CATALOG_TABLES:
+            cat.append(re.sub(r"IF NOT EXISTS (\w+)", r"IF NOT EXISTS cat.\1", stmt, count=1))
+        else:   # cross-file foreign keys aren't possible in SQLite
+            user.append(stmt.replace("REFERENCES printings(id)", ""))
+    return ";\n".join(cat) + ";", ";\n".join(user) + ";"
+
+
+def connect(path: str | os.PathLike | None = None, catalog: str | os.PathLike | None = None) -> sqlite3.Connection:
+    """Open the collection. Normally one file holds everything. With `catalog` (or MTGSTACK_CATALOG_DB) the card
+    catalog lives in a second, attached file, so the small user file can be saved cheaply (the phone build)."""
     path = Path(path) if path else DEFAULT_PATH
+    catalog = catalog or os.environ.get("MTGSTACK_CATALOG_DB")
     if str(path) != ":memory:":
         path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")       # readers don't block the writer (UI stays responsive)
-    conn.execute("PRAGMA synchronous=NORMAL")
-    _migrate(conn)
-    conn.executescript(TABLES)
+    if os.environ.get("MTGSTACK_BROWSER"):
+        conn.execute("PRAGMA journal_mode=MEMORY")   # browser filesystem: no shared-memory WAL
+    else:
+        conn.execute("PRAGMA journal_mode=WAL")      # readers don't block the writer (UI stays responsive)
+        conn.execute("PRAGMA synchronous=NORMAL")
+    if catalog:
+        conn.execute("ATTACH DATABASE ? AS cat", (str(catalog),))
+        if os.environ.get("MTGSTACK_BROWSER"):
+            conn.execute("PRAGMA cat.journal_mode=MEMORY")
+        cat_ddl, user_ddl = _split_ddl(TABLES)
+        conn.executescript("PRAGMA foreign_keys = ON;" + cat_ddl + user_ddl)
+        conn.execute("ALTER TABLE cat.printings ADD COLUMN image_small TEXT") if not any(
+            r[1] == "image_small" for r in conn.execute("PRAGMA cat.table_info(printings)")) else None
+        add_user_cols(conn)
+        views = VIEWS.replace("CREATE VIEW", "CREATE TEMP VIEW")   # temp views may span attached files
+    else:
+        _migrate(conn)
+        conn.executescript(TABLES)
+        views = VIEWS
     for (name,) in conn.execute("SELECT name FROM sqlite_master WHERE type='view'").fetchall():
         conn.execute(f"DROP VIEW IF EXISTS {name}")
-    conn.executescript(VIEWS)
+    for (name,) in conn.execute("SELECT name FROM sqlite_temp_master WHERE type='view'").fetchall():
+        conn.execute(f"DROP VIEW IF EXISTS temp.{name}")
+    conn.executescript(views)
     return conn
+
+
+def add_user_cols(conn: sqlite3.Connection) -> None:
+    have = {r[1] for r in conn.execute("PRAGMA main.table_info(decks)")}
+    for col, ddl in (("status", "TEXT NOT NULL DEFAULT 'built'"), ("priority", "INTEGER NOT NULL DEFAULT 100")):
+        if have and col not in have:
+            conn.execute(f"ALTER TABLE main.decks ADD COLUMN {col} {ddl}")
 
 
 def _migrate(conn: sqlite3.Connection) -> None:

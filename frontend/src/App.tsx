@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { api } from "./api";
+import { LOCAL } from "./local/boot";
 import Collection from "./pages/Collection";
 import Decks from "./pages/Decks";
 import DeckDetail from "./pages/DeckDetail";
@@ -36,11 +37,19 @@ function CatalogBanner() {
     );
   }
   if (job.state === "error") return <div className="banner err">Card database download failed: {job.error} <button onClick={() => api.syncCatalog().then(() => status.refetch())}>Retry</button></div>;
+  if (LOCAL && s.update_available && s.printings >= 20000)
+    return (
+      <div className="banner">
+        <span>New card data &amp; prices are available ({s.remote?.version}).</span>
+        <button className="primary" onClick={() => api.syncCatalog().then(() => status.refetch())}>Update</button>
+      </div>
+    );
   if (s.printings >= 20000 || job.state === "done") return null;
+  const mb = s.remote?.size_gz ? ` (~${Math.max(1, Math.round(s.remote.size_gz / 1e6))} MB)` : LOCAL ? "" : " (Scryfall, ~500 MB)";
   return (
     <div className="banner">
-      <span><b>One-time setup:</b> download the full card database (Scryfall, ~500 MB) so search, imports and prices are instant and work offline.
-        Until then, cards are looked up online as you go.</span>
+      <span><b>One-time setup:</b> download the full card database{mb} so search, imports and the scanner work
+        offline{LOCAL ? " on this device" : " and prices are instant"}. Until then, cards are looked up online as you go.</span>
       <button className="primary" onClick={() => api.syncCatalog().then(() => status.refetch())}>Download now</button>
     </div>
   );
@@ -73,12 +82,12 @@ export default function App() {
             {menu && (
               <div className="menu" onMouseLeave={() => setMenu(false)}>
                 <button className="show-sm" onClick={() => { setMenu(false); setAdding(true); }}>+ Add cards</button>
-                <button onClick={() => { setMenu(false); setPhone(true); }}>📱 Open on your phone</button>
+                {!LOCAL && <button onClick={() => { setMenu(false); setPhone(true); }}>📱 Open on your phone</button>}
                 <button onClick={async () => { setMenu(false); toast("Refreshing prices…", "info"); try { await fetch("/api/prices/refresh", { method: "POST" }); qc.invalidateQueries(); toast("Prices updated"); } catch { toast("Price refresh failed", "err"); } }}>Refresh prices</button>
                 <button onClick={async () => { setMenu(false); await api.syncCatalog(); qc.invalidateQueries({ queryKey: ["catalog-status"] }); }}>Re-download card database</button>
                 <a href="/api/export/tcgplayer" target="_blank">Export collection (TCGplayer CSV)</a>
-                <a href="/docs" target="_blank">API docs</a>
-                <a href="/classic">Classic UI</a>
+                {!LOCAL && <a href="/docs" target="_blank">API docs</a>}
+                {!LOCAL && <a href="/classic">Classic UI</a>}
               </div>
             )}
           </div>

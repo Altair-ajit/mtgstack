@@ -7,3 +7,5 @@ demo/dist/
 frontend/node_modules/
 frontend/dist/
 scan-data/
+site/
+.wheels-tmp/

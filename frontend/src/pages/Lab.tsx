@@ -5,6 +5,7 @@ import { lab } from "../api";
 import type { Finish } from "../api";
 import CardPicker from "../components/CardPicker";
 import PhoneDialog from "../components/PhoneDialog";
+import { LOCAL } from "../local/boot";
 import { CardImg, Empty, FINISH_LABEL, useToast } from "../ui";
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v}%`);
@@ -54,7 +55,7 @@ export default function Lab() {
           </div>
           <div className="actions">
             <Link className="btn primary" to="/lab/live">▶ Live session</Link>
-            <button className="hide-xs" onClick={() => setPhone(true)}>📱 On your phone</button>
+            {!LOCAL && <button className="hide-xs" onClick={() => setPhone(true)}>📱 On your phone</button>}
             <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={e => e.target.files && upload(e.target.files)} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading}>{uploading ? "Scanning…" : "Upload photos"}</button>
             <button disabled={rr?.state === "running" || !s?.reviewed} onClick={async () => { await lab.rerun(); rerun.refetch(); }}

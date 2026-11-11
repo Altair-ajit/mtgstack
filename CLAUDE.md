@@ -44,3 +44,12 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 
 ## Not verified yet
 - Live Scryfall/Card Kingdom calls (built in a sandbox without access), and the scanner on real photos.
+
+## Phone build (GitHub Pages, runs in the browser)
+- `mtgstack/browser.py` runs the real FastAPI app in Pyodide (worker: `frontend/public/py/worker.js`; service worker
+  `frontend/public/sw.js` routes `/api/*`). Constraints: no threads (inlined), no rapidfuzz (`mtgstack/_fuzz.py`),
+  HTTP via sync XHR, OCR via `markers.set_ocr_backend` (Tesseract WASM). Keep server code free of other native deps.
+- Split DB when `MTGSTACK_CATALOG_DB` is set: catalog tables in attached `cat`, user tables in main, TEMP views.
+- Build: `python scripts/build_pages.py --out site --base /mtgstack/` + `python -m mtgstack.cli build-catalog site/data`.
+  Test locally: serve the parent dir so the site is at /mtgstack/, then drive it with Playwright (see tests notes).
+- Pyodide version is pinned in both `scripts/build_pages.py` and `worker.js` (PYODIDE path).

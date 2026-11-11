@@ -63,7 +63,30 @@ calls go to the Python server on :8765, so keep that running too). Run *build fr
 
 ---
 
-## Using your iPhone (scanning + Scanner Lab training)
+## Phone app (GitHub Pages) - no PC needed
+The same app also ships as a static website that runs **entirely on your phone**: Python (Pyodide), the scanner
+(OpenCV + Tesseract compiled to WebAssembly) and your collection (saved in the browser's storage). It works offline;
+the internet is only used to download the card database / prices and to look up cards it doesn't know yet.
+
+**One-time setup**
+1. Create an empty repo on GitHub (public = free Pages; private needs a paid plan for Pages), then in WSL:
+   `git remote add origin https://github.com/<you>/mtgstack.git && git push -u origin main`
+2. On GitHub: repo **Settings → Pages → Source: GitHub Actions**. The *Phone app* workflow runs (≈10 min the first
+   time) and then daily, rebuilding the card database with today's prices.
+3. On the iPhone, open `https://<you>.github.io/mtgstack/` in Safari → Share → **Add to Home Screen**, open it from
+   that icon, and tap **Download now** for the card database (~20-30 MB).
+
+**Good to know**
+- Data lives on the phone. iOS keeps the Home Screen app's storage separate from Safari's, so always use the icon.
+  Back up with *⋯ → Export collection* (TCGplayer CSV); share scans for tuning with *Scanner Lab → Export dataset*.
+- Everything on `<you>.github.io` is one browser origin, so other Pages sites under your account could read this
+  app's storage. Use a separate account/org or a custom domain if that matters.
+- Updates: push to `main`; open apps show a **Reload** bar. *Refresh prices* pulls the newest daily database.
+- How it works: `frontend/public/sw.js` routes `/api/*` to `frontend/public/py/worker.js`, which runs the FastAPI
+  app in Pyodide (`mtgstack/browser.py`). `scripts/build_pages.py` assembles the site;
+  `mtgstack.cli build-catalog` builds the card database (`.github/workflows/pages.yml`).
+
+## Using your iPhone with the PC version (Tailscale / Wi-Fi)
 The app runs on your PC; the phone is just the camera and screen. Two ways in:
 
 **Tailscale (recommended)** — real HTTPS, no certificate warnings, works on any network (home Wi-Fi, cellular).
