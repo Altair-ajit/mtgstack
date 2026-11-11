@@ -13,7 +13,8 @@ from . import collection as col, db, decks, prices, tcgplayer
 from .catalog import Catalog
 from .query import QueryError, query, summarize
 
-WEB = Path(__file__).parent / "web"
+WEB = Path(__file__).parent / "web"            # legacy single-file UI (still served at /classic)
+DIST = Path(__file__).parent / "web_dist"       # React UI build (frontend/ -> npm run build)
 
 
 class AddLot(BaseModel):
@@ -48,6 +49,33 @@ class SplitDupes(BaseModel):
     add_tags: list[str] = []
     remove_tags: list[str] = []
     dry_run: bool = True
+
+
+class LotPatch(BaseModel):
+    qty: int | None = None
+    condition: str | None = None
+    finish: str | None = None
+    language: str | None = None
+    notes: str | None = None
+
+
+class Bulk(BaseModel):
+    lot_ids: list[int]
+    action: str                     # send | tag | untag | remove
+    qty: int | None = None          # per lot; None = all copies
+    deck: str | None = None
+    board: str = "main"
+    tags: list[str] = []
+
+
+class ImportPreview(BaseModel):
+    text: str
+    filename: str | None = None
+
+
+class ImportCommit(BaseModel):
+    rows: list[dict]
+    dest: dict
 
 
 class DeckImport(BaseModel):
@@ -270,12 +298,140 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         return {"quotes": guard(prices.quotes, conn, printing_id),
                 "history": {f: guard(prices.history, conn, printing_id, f) for f in ("nonfoil", "foil", "etched")}}
 
+    # ---- browsing (React UI) ------------------------------------------------------------------
+    from . import browse, importer
+
+    def _csv(v: str | None) -> list[str]:
+        return [x for x in (v or "").split(",") if x]
+
+    @app.get("/api/cards")
+    def api_cards(q: str = "", set: str = "", rarity: str = "", color: str = "", type: str = "", finish: str = "",
+                  condition: str = "", language: str = "", tag: str = "", deck: str = "", min_price: str = "",
+                  max_price: str = "", sort: str = "name", page: int = 1, size: int = 60, facets: bool = True):
+        """Collection rows (printing + finish + condition + language), filtered, sorted, paged, with facet counts."""
+        f = {"set": _csv(set), "rarity": _csv(rarity), "color": _csv(color), "type": _csv(type),
+             "finish": _csv(finish), "condition": _csv(condition), "language": _csv(language), "tag": _csv(tag),
+             "deck": deck or None, "min_price": min_price, "max_price": max_price}
+        return guard(browse.cards, conn, q, f, sort, page, size, facets)
+
+    @app.get("/api/card/{printing_id}")
+    def api_card(printing_id: str):
+        return guard(browse.card_detail, conn, printing_id)
+
+    @app.get("/api/catalog/names")
+    def api_names(text: str):
+        found = guard(browse.search_names, conn, text)
+        if not found and online and len(text) >= 3:      # catalog not downloaded / brand-new card
+            try:
+                with lock:
+                    catalog.prints_by_name(text)
+                found = guard(browse.search_names, conn, text)
+            except Exception:
+                pass
+        return found
+
+    sync_job = {"state": "idle", "bytes": 0, "total": 0, "cards": 0, "error": None}
+
+    @app.get("/api/catalog/status")
+    def api_catalog_status():
+        with lock:
+            n = conn.execute("SELECT COUNT(*) FROM printings").fetchone()[0]
+            synced = conn.execute("SELECT value FROM meta WHERE key='catalog_synced_at'").fetchone()
+        return {"printings": n, "synced_at": synced[0] if synced else None, "job": sync_job}
+
+    @app.post("/api/catalog/sync")
+    def api_catalog_sync():
+        """Download Scryfall's full card database (~500 MB, once; then daily for prices) in the background."""
+        if sync_job["state"] == "running":
+            return sync_job
+        if not online:
+            raise HTTPException(400, "offline mode")
+        path = db_path
+
+        def run():
+            sync_job.update(state="running", bytes=0, total=0, cards=0, error=None)
+            try:
+                c2 = db.connect(path)
+                Catalog(c2).sync_bulk(progress=lambda d, t, n: sync_job.update(bytes=d, total=t, cards=n))
+                c2.close()
+                sync_job["state"] = "done"
+            except Exception as e:  # surfaced to the UI
+                sync_job.update(state="error", error=str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+        return sync_job
+
+    @app.get("/api/summary")
+    def api_summary():
+        with lock:
+            t = conn.execute("SELECT COALESCE(SUM(qty),0), COUNT(DISTINCT printing_id) FROM lots").fetchone()
+            v = conn.execute("SELECT ROUND(COALESCE(SUM(qty*COALESCE(price,0)),0),2) FROM lot_view").fetchone()[0]
+            n = conn.execute("SELECT COUNT(*) FROM printings").fetchone()[0]
+            d = conn.execute("SELECT COUNT(*), SUM(status='building') FROM decks").fetchone()
+        return {"cards": t[0], "printings_owned": t[1], "value": v, "catalog_printings": n,
+                "decks": d[0], "building": d[1] or 0, "online": online}
+
+    @app.patch("/api/lots/{lot_id}")
+    def api_lot_patch(lot_id: int, body: LotPatch):
+        new = guard(col.update_lot, conn, lot_id, body.qty, body.condition, body.finish, body.language, body.notes)
+        return {"lot": col.get_lot(conn, new) if new else None}
+
+    @app.post("/api/lots/bulk")
+    def api_lots_bulk(body: Bulk):
+        def run():
+            done = []
+            for lid in body.lot_ids:
+                if not conn.execute("SELECT 1 FROM lots WHERE id=?", (lid,)).fetchone():
+                    continue          # merged away by an earlier step in this batch
+                if body.action == "send":
+                    done.append(decks.send(conn, lid, body.qty, body.deck, body.board, commit=False))
+                elif body.action == "tag":
+                    done.append(col.move(conn, lid, body.qty, add_tags=body.tags, commit=False))
+                elif body.action == "untag":
+                    done.append(col.move(conn, lid, body.qty, remove_tags=body.tags, commit=False))
+                elif body.action == "remove":
+                    col.remove(conn, lid, body.qty, "bulk remove", commit=False)
+                else:
+                    raise ValueError(f"unknown action {body.action}")
+            conn.commit()
+            return {"lots": len(body.lot_ids)}
+        return guard(run)
+
+    @app.post("/api/import/preview")
+    def api_import_preview(body: ImportPreview):
+        """Paste / .txt / .csv -> every row matched to a printing (or flagged), nothing saved yet."""
+        return guard(importer.preview, conn, catalog, body.text, body.filename, online)
+
+    @app.post("/api/import/commit")
+    def api_import_commit(body: ImportCommit):
+        res = guard(importer.commit, conn, catalog, body.rows, body.dest)
+        for a in res.get("allocations", []):
+            a["deck_progress"] = guard(decks.reconcile, conn, a["deck"])["totals"]["progress"]
+        return res
+
     # ---- web -------------------------------------------------------------------------------
     app.mount("/static", StaticFiles(directory=WEB), name="static")
 
+    @app.get("/classic")
+    def classic():
+        return FileResponse(WEB / "index.html")
+
+    if DIST.exists():
+        app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
+
     @app.get("/")
     def index():
-        return FileResponse(WEB / "index.html")
+        return FileResponse(DIST / "index.html" if (DIST / "index.html").exists() else WEB / "index.html")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str):
+        """Client-side routes (/decks/foo, /card/...) all load the React app."""
+        if path.startswith("api/"):
+            raise HTTPException(404, "no such endpoint")
+        f = DIST / path
+        if DIST.exists() and f.is_file():
+            return FileResponse(f)
+        return FileResponse(DIST / "index.html" if (DIST / "index.html").exists() else WEB / "index.html")
 
     app.state.conn = conn
     return app

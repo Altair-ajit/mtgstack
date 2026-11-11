@@ -1,7 +1,22 @@
 # mtgstack
 
-A tag-based Magic: The Gathering collection manager with a scanner that identifies cards from their printed markers.
-Everything lives in one SQLite file. The CLI has `--json` on every command, there's a REST API, and a web UI that works on a phone.
+A Magic: The Gathering collection manager in the style of a TCGplayer collection, plus decks that work like
+mini collections, a camera scanner, and imports from TCGplayer/ManaBox/Moxfield/Deckbox or a pasted list.
+
+- **Collection.** Every card you own on one searchable page: a filter sidebar (deck, location, set, color, type,
+  rarity, printing, condition, language, price) with counts, sorting, and list or grid view. Click a card for its
+  prices, your copies (edit quantity and condition, move to a deck) and every printing.
+- **Decks.** Each deck is a mini collection: *have / to move / to buy*, grouped by type, with Arena, MTGO,
+  Moxfield and TCGplayer export. Mark a deck **in progress** and cards it needs go straight into it as you add them.
+- **Import.** Paste a list, or upload the `.txt` or `.csv` the TCGplayer app exports. Every row is matched to an
+  exact printing (TCGplayer product ID > set + number > set + name > name) and shown for review before anything is saved.
+- **Scan.** Phone camera, any angle; set, number, language and foil are read from the card's printed markers.
+- **Prices.** TCGplayer market (via Scryfall) and Card Kingdom retail and buylist, per printing and finish, with history.
+
+Everything is one SQLite file (`~/.mtgstack/collection.db`). The UI is React + TypeScript (`frontend/`). The
+built copy is committed in `mtgstack/web_dist`, so running the app only needs Python.
+
+## Quick start
 
 **WSL + VS Code (recommended on Windows):**
 
@@ -37,8 +52,14 @@ python -m venv .venv && .venv/bin/pip install -e .        # Windows: .venv\Scrip
 mtgstack serve [--reload] [--host 0.0.0.0 --https]
 ```
 
-The catalog fills itself from Scryfall on demand. To load every printing up front and make the scanner's name matching
-fully local, run `mtgstack catalog sync` once (~500 MB download).
+**First run:** click **Download now** on the banner, or run `mtgstack catalog sync`. That downloads Scryfall's
+card database once (~500 MB, a few minutes), and after that search, imports and prices are local and instant.
+Re-run it, or use *Refresh prices* in the ⋯ menu, to update prices. Without it the app still works, but looks
+cards up online one at a time.
+
+**Changing the UI:** install Node 20+ in WSL (`curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+&& sudo apt install -y nodejs`), run the task *frontend dev (hot reload)*, and open http://localhost:5173 (API
+calls go to the Python server on :8765, so keep that running too). Run *build frontend* to update `mtgstack/web_dist`.
 
 ---
 

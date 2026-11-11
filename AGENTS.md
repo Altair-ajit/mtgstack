@@ -13,6 +13,8 @@ Use `mtgstack --json ...` (CLI) or the REST API (`mtgstack serve`, OpenAPI at `/
 | Deck status | `mtgstack --json deck show SLUG` | `GET /api/decks/SLUG` |
 | Prices for a printing | `mtgstack --json prices show PRINTING_ID` | `GET /api/prices/PRINTING_ID` |
 | What decks still need (owned or not) | `mtgstack --json wants 'is:building status:need'` | `GET /api/entries?q=...` |
+| Collection page rows (grouped, filtered, faceted) | — | `GET /api/cards?q=&set=&color=&type=&finish=&condition=&tag=&deck=&sort=&page=&size=` |
+| One card: prices, copies, printings, decks | — | `GET /api/card/{printing_id}` |
 | Recent changes | `mtgstack --json events -n 50` | `GET /api/events` |
 
 Lot rows include: `lot_id, qty, finish, condition, language, tags` (space-separated), `printing_id` (Scryfall id), `oracle_id`,
@@ -25,6 +27,10 @@ Lot rows include: `lot_id, qty, finish, condition, language, tags` (space-separa
 - `send LOT [--deck SLUG --board B]` moves copies out of their deck (to the collection, or another deck). Use it to override an auto-allocation.
 - Adding cards (`add`, scan `--add`, CSV import, `POST /api/lots`) can auto-tag them into in-progress decks. The response lists them under `allocations`. Pass `auto_allocate: false` to the API to skip that. `--remove 'deck:*'` removes by prefix.
 - Every change is appended to `events` with its parameters. To undo, apply the reverse move.
+
+## Import
+- `POST /api/import/preview {text, filename}` parses and matches rows without saving anything. Rows have `status` matched / guessed / unmatched.
+- `POST /api/import/commit {rows, dest}`, where dest is `{type:'collection', tags:[]}` or `{type:'deck', name, format, status, owned}`.
 
 ## Conventions
 - Main board: `deck:<slug>`. Other boards: `deck:<slug>:side`, `deck:<slug>:commander`, `deck:<slug>:companion`, `deck:<slug>:maybe`.

@@ -26,8 +26,8 @@ _COND_ALIASES = {"near mint": "NM", "nm": "NM", "lightly played": "LP", "lp": "L
 def norm_condition(c: str | None) -> str:
     if not c:
         return "NM"
-    c = c.strip().lower()
-    for suffix in (" foil", " holofoil"):
+    c = c.strip().lower().replace("_", " ").replace("-", " ")
+    for suffix in (" foil", " holofoil", " foil etched"):
         c = c.removesuffix(suffix)
     return _COND_ALIASES.get(c, c.upper() if c.upper() in CONDITIONS else "NM")
 
@@ -103,6 +103,8 @@ def add(conn: sqlite3.Connection, printing_id: str, qty: int = 1, finish: str = 
         "INSERT INTO lots(printing_id, finish, condition, language, qty, acquired_price, notes) VALUES (?,?,?,?,?,?,?)",
         (printing_id, finish, norm_condition(condition), language, qty, acquired_price, notes))
     lot_id = cur.lastrowid
+    # now owned: start its price history from today's prices
+    conn.execute("INSERT OR IGNORE INTO prices SELECT * FROM current_prices WHERE printing_id = ?", (printing_id,))
     _set_tags(conn, lot_id, norm_tags(tags))
     report: list = []
     if auto_allocate:
@@ -182,6 +184,30 @@ def remove(conn, lot_id: int, qty: int | None = None, reason: str = "", commit: 
     log_event(conn, "remove", lot_id=lot_id, printing_id=lot["printing_id"], qty=qty, reason=reason)
     if commit:
         conn.commit()
+
+
+def update_lot(conn, lot_id: int, qty: int | None = None, condition: str | None = None, finish: str | None = None,
+               language: str | None = None, notes: str | None = None, commit: bool = True) -> int | None:
+    """Edit a lot's attributes. qty=0 removes it. Returns the surviving lot id (it may merge into a twin)."""
+    lot = conn.execute("SELECT * FROM lots WHERE id=?", (lot_id,)).fetchone()
+    if not lot:
+        raise KeyError(f"no lot {lot_id}")
+    if qty is not None and qty <= 0:
+        remove(conn, lot_id, commit=commit)
+        return None
+    sets, vals = [], []
+    for col_, val in (("qty", qty), ("condition", norm_condition(condition) if condition else None),
+                      ("finish", norm_finish(finish) if finish else None), ("language", language), ("notes", notes)):
+        if val is not None:
+            sets.append(f"{col_}=?")
+            vals.append(val)
+    if sets:
+        conn.execute(f"UPDATE lots SET {', '.join(sets)}, updated_at=datetime('now') WHERE id=?", (*vals, lot_id))
+    log_event(conn, "update_lot", lot_id=lot_id, qty=qty, condition=condition, finish=finish, language=language)
+    new_id = _merge_into_twin(conn, lot_id)
+    if commit:
+        conn.commit()
+    return new_id
 
 
 def retag(conn, tag_from: str, tag_to: str) -> int:

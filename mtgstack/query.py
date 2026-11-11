@@ -293,6 +293,15 @@ ENTRY_SORTS = {**SORTS, "value": "COALESCE(v.price,0)*v.to_buy", "qty": "v.wante
                "status": "CASE v.status WHEN 'owned' THEN 0 WHEN 'move' THEN 1 ELSE 2 END", "board": "v.board"}
 
 
+def where_clause(q: str, target: str = "lots") -> tuple[str, list, list[str]]:
+    """Just the WHERE part of a query (plus any sort: directives), for callers that build their own SELECT."""
+    p = _Parser(tokenize(q or ""), target)
+    where, params = p.expr()
+    if p.i != len(p.toks):
+        raise QueryError("unbalanced parentheses")
+    return where, params, p.sort
+
+
 def compile_query(q: str, target: str = "lots") -> tuple[str, list]:
     p = _Parser(tokenize(q or ""), target)
     where, params = p.expr()

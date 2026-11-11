@@ -184,6 +184,9 @@ def reconcile(conn, slug: str, q: str = "") -> dict:
                "type_line": e["type_line"], "mana_cost": e["mana_cost"], "cmc": e["cmc"], "colors": e["colors"],
                "rarity": e["rarity"], "price": e["price"], "printing_id": e["printing_id"], "finish": e["finish"],
                "oracle_id": e["oracle_id"], "entry_id": e["entry_id"], "in_other_decks": [], "where": [],
+               "card_printing_id": e["card_printing_id"], "image_small": e["image_small"],
+               "image_normal": e["image_normal"], "set_code": e["set_code"], "set_name": e["set_name"],
+               "collector_number": e["collector_number"],
                "in_deck_lots": [], "board_tag": e["board_tag"],
                "cheapest": None}
         if e["status"] != "owned":
@@ -361,8 +364,18 @@ def export(conn, slug: str, fmt: str = "arena", source: str = "list") -> str:
 
 
 def list_decks(conn) -> list[dict]:
-    """Every deck with progress: have/wanted, to move (free copies you own), to buy (+ cost)."""
+    """Every deck with progress: have/wanted, to move (free copies you own), to buy (+ cost), value, cover art."""
     out = []
     for d in rows(conn.execute("SELECT * FROM decks ORDER BY status='building' DESC, priority, name")):
-        out.append({**d, **_totals(entries(conn, d["slug"]))})
+        es = entries(conn, d["slug"])
+        t = _totals(es)
+        cover = next((e for e in es if e["board"] == "commander"), None) or \
+            max((e for e in es if e["board"] != "maybe"), key=lambda e: e["price"] or 0, default=None)
+        owned_value = conn.execute(
+            "SELECT ROUND(COALESCE(SUM(v.qty * COALESCE(v.price,0)),0),2) FROM lot_view v WHERE EXISTS (SELECT 1 FROM "
+            "lot_tags x WHERE x.lot_id=v.lot_id AND (x.tag=? OR x.tag LIKE ?))",
+            (f"deck:{d['slug']}", f"deck:{d['slug']}:%")).fetchone()[0]
+        out.append({**d, **t, "cover_image": cover["image_normal"] if cover else None,
+                    "cover_name": cover["name"] if cover else None, "owned_value": owned_value,
+                    "commander": next((e["name"] for e in es if e["board"] == "commander"), None)})
     return out

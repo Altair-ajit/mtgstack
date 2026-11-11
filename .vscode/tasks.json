@@ -45,6 +45,23 @@
       "windows": {
         "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}/run.ps1 -Test"
       }
+    },
+    {
+      "label": "mtgstack: frontend dev (hot reload, needs Node)",
+      "type": "shell",
+      "command": "cd ${workspaceFolder}/frontend && npm install && npm run dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "mtgstack: build frontend",
+      "type": "shell",
+      "command": "cd ${workspaceFolder}/frontend && npm install && npm run build",
+      "problemMatcher": []
     }
   ]
 }

@@ -32,7 +32,7 @@ _COLS = ["id", "oracle_id", "name", "set_code", "set_name", "collector_number", 
          "released_at", "finishes", "border_color", "frame", "frame_effects", "full_art", "promo",
          "promo_types", "type_line", "mana_cost", "cmc", "colors", "color_identity", "oracle_text",
          "tcgplayer_id", "tcgplayer_etched_id", "cardmarket_id", "arena_id", "mtgo_id",
-         "image_normal", "image_art_crop", "legalities"]
+         "image_small", "image_normal", "image_art_crop", "legalities"]
 
 
 def flatten(card: dict) -> dict:
@@ -74,37 +74,62 @@ def flatten(card: dict) -> dict:
         "cardmarket_id": card.get("cardmarket_id"),
         "arena_id": card.get("arena_id"),
         "mtgo_id": card.get("mtgo_id"),
+        "image_small": imgs.get("small"),
         "image_normal": imgs.get("normal"),
         "image_art_crop": imgs.get("art_crop"),
         "legalities": json.dumps(card.get("legalities") or {}),
     }
 
 
-def upsert_cards(conn: sqlite3.Connection, cards: Iterable[dict], record_prices: bool = True) -> int:
+_PRICE_KEYS = (("usd", "nonfoil", "tcgplayer", "USD"), ("usd_foil", "foil", "tcgplayer", "USD"),
+               ("usd_etched", "etched", "tcgplayer", "USD"), ("eur", "nonfoil", "cardmarket", "EUR"),
+               ("eur_foil", "foil", "cardmarket", "EUR"), ("eur_etched", "etched", "cardmarket", "EUR"))
+
+
+def tracked_printings(conn: sqlite3.Connection) -> set[str]:
+    """Printings worth keeping daily price history for: owned, or wanted by a deck."""
+    return {r[0] for r in conn.execute(
+        "SELECT printing_id FROM lots UNION SELECT printing_id FROM deck_entries WHERE printing_id IS NOT NULL "
+        "UNION SELECT p.id FROM printings p JOIN deck_entries e ON e.oracle_id = p.oracle_id AND e.printing_id IS NULL")}
+
+
+def upsert_cards(conn: sqlite3.Connection, cards: Iterable[dict], record_prices: bool = True,
+                 tracked: set[str] | None = None) -> int:
+    """Insert/update printings. Prices go to current_prices for every card and to the daily history table
+    only for tracked (owned/wanted) printings, which keeps the history small."""
     today = dt.date.today().isoformat()
-    n = 0
-    placeholders = ",".join("?" for _ in _COLS)
-    updates = ",".join(f"{c}=excluded.{c}" for c in _COLS[1:])
+    if record_prices and tracked is None:
+        tracked = tracked_printings(conn)
+    rows, cur, hist = [], [], []
     for card in cards:
-        if card.get("object") not in (None, "card") or "oracle_id" not in card and not card.get("card_faces"):
+        if card.get("object") not in (None, "card") or ("oracle_id" not in card and not card.get("card_faces")):
             continue
         row = flatten(card)
-        conn.execute(f"INSERT INTO printings({','.join(_COLS)}) VALUES ({placeholders}) "
-                     f"ON CONFLICT(id) DO UPDATE SET {updates}", [row[c] for c in _COLS])
+        rows.append([row[c] for c in _COLS])
         if record_prices:
-            # Scryfall's usd/usd_foil/usd_etched are TCGplayer market prices.
             p = card.get("prices") or {}
-            for key, finish in (("usd", "nonfoil"), ("usd_foil", "foil"), ("usd_etched", "etched")):
+            for key, finish, source, ccy in _PRICE_KEYS:
                 if p.get(key):
-                    conn.execute("INSERT OR REPLACE INTO prices VALUES (?,?,?,?,?,?,?)",
-                                 (card["id"], finish, "tcgplayer", "market", float(p[key]), "USD", today))
-            for key, finish in (("eur", "nonfoil"), ("eur_foil", "foil"), ("eur_etched", "etched")):
-                if p.get(key):
-                    conn.execute("INSERT OR REPLACE INTO prices VALUES (?,?,?,?,?,?,?)",
-                                 (card["id"], finish, "cardmarket", "market", float(p[key]), "EUR", today))
-        n += 1
+                    rec = (card["id"], finish, source, "market", float(p[key]), ccy, today)
+                    cur.append(rec)
+                    if card["id"] in tracked:
+                        hist.append(rec)
+    placeholders = ",".join("?" for _ in _COLS)
+    updates = ",".join(f"{c}=excluded.{c}" for c in _COLS[1:])
+    conn.executemany(f"INSERT INTO printings({','.join(_COLS)}) VALUES ({placeholders}) "
+                     f"ON CONFLICT(id) DO UPDATE SET {updates}", rows)
+    conn.executemany("INSERT OR REPLACE INTO current_prices VALUES (?,?,?,?,?,?,?)", cur)
+    conn.executemany("INSERT OR REPLACE INTO prices VALUES (?,?,?,?,?,?,?)", hist)
     conn.commit()
-    return n
+    return len(rows)
+
+
+def upsert_sets(conn: sqlite3.Connection, sets: Iterable[dict]) -> int:
+    rows = [(s["code"].lower(), s["name"], s.get("set_type"), s.get("released_at"), s.get("icon_svg_uri"),
+             s.get("card_count")) for s in sets]
+    conn.executemany("INSERT OR REPLACE INTO sets VALUES (?,?,?,?,?,?)", rows)
+    conn.commit()
+    return len(rows)
 
 
 class Scryfall:
@@ -243,22 +268,50 @@ class Catalog:
         return out
 
     # ---- bulk ------------------------------------------------------------------------------
-    def sync_bulk(self, kind: str = "default_cards", progress=None) -> int:
+    def sync_bulk(self, kind: str = "default_cards", progress=None, url: str | None = None) -> int:
+        """Download Scryfall's bulk file once and load every printing + today's prices locally.
+        progress(bytes_done, bytes_total, cards_loaded) is called as it goes."""
         import ijson
-        url = self.client.bulk_url(kind)
-        n = 0
+        try:
+            upsert_sets(self.conn, (self.client.get("/sets") or {}).get("data", []))
+        except Exception:
+            pass                                    # set metadata is nice-to-have
+        url = url or self.client.bulk_url(kind)
+        tracked = tracked_printings(self.conn)
+        n, done = 0, 0
         with self.client.http.stream("GET", url) as resp:
             resp.raise_for_status()
+            total = int(resp.headers.get("content-length") or 0)
+
+            def chunks():
+                nonlocal done
+                for chunk in resp.iter_bytes(1 << 20):
+                    done += len(chunk)
+                    yield chunk
+
             batch = []
-            for card in ijson.items(_IterStream(resp.iter_bytes()), "item", use_float=True):
+            for card in ijson.items(_IterStream(chunks()), "item", use_float=True):
                 batch.append(card)
-                if len(batch) >= 2000:
-                    n += upsert_cards(self.conn, batch)
+                if len(batch) >= 5000:
+                    n += upsert_cards(self.conn, batch, tracked=tracked)
                     batch.clear()
                     if progress:
-                        progress(n)
-            n += upsert_cards(self.conn, batch)
+                        progress(done, total, n)
+            n += upsert_cards(self.conn, batch, tracked=tracked)
+        self.conn.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_synced_at', datetime('now'))")
+        self.conn.execute("INSERT OR REPLACE INTO meta VALUES ('catalog_printings', ?)", (str(n),))
+        self.conn.commit()
+        if progress:
+            progress(done, total or done, n)
         return n
+
+    def lookup_batch(self, identifiers: list[dict]) -> list[dict]:
+        """Scryfall /cards/collection (75 per request): fills catalog gaps without one call per card."""
+        if not (self.online and identifiers):
+            return []
+        cards = self.client.collection(identifiers)
+        upsert_cards(self.conn, cards)
+        return cards
 
 
 class _IterStream:

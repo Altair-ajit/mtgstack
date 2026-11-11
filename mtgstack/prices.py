@@ -15,7 +15,7 @@ import os
 
 import httpx
 
-from .catalog import HEADERS, Catalog, upsert_cards
+from .catalog import HEADERS, Catalog, tracked_printings, upsert_cards
 from .db import log_event, rows
 
 CK_PRICELIST = os.environ.get("MTGSTACK_CK_URL", "https://api.cardkingdom.com/api/v2/pricelist")
@@ -39,6 +39,7 @@ def ingest_cardkingdom(conn, payload: dict, only_known: bool = True) -> int:
     price_retail, price_buy, ...}]}. Field access is defensive since the feed isn't formally documented."""
     today = dt.date.today().isoformat()
     known = {r[0] for r in conn.execute("SELECT id FROM printings")} if only_known else None
+    tracked = tracked_printings(conn)
     n = 0
     for item in payload.get("data", payload if isinstance(payload, list) else []):
         sid = item.get("scryfall_id")
@@ -53,8 +54,10 @@ def ingest_cardkingdom(conn, payload: dict, only_known: bool = True) -> int:
             except (TypeError, ValueError):
                 continue
             if price > 0:
-                conn.execute("INSERT OR REPLACE INTO prices VALUES (?,?,?,?,?,?,?)",
-                             (sid, finish, "cardkingdom", kind, price, "USD", today))
+                rec = (sid, finish, "cardkingdom", kind, price, "USD", today)
+                conn.execute("INSERT OR REPLACE INTO current_prices VALUES (?,?,?,?,?,?,?)", rec)
+                if sid in tracked:
+                    conn.execute("INSERT OR REPLACE INTO prices VALUES (?,?,?,?,?,?,?)", rec)
                 n += 1
     log_event(conn, "prices_cardkingdom", points=n)
     conn.commit()
