@@ -65,3 +65,16 @@ def test_track_report():
     far, _ = place(CARD, 10, "table", scale=0.42)
     assert detect.track(cv2.resize(far, (640, 640)))["hint"] == "move closer"
     assert detect.track(np.full((480, 640, 3), 90, np.uint8))["found"] is False
+
+
+def test_track_refuses_cut_off_card():
+    """Live capture must not fire when part of the card is outside the frame."""
+    import cv2
+    from mtgstack.scanner import detect
+    from synth import card_image, place
+    full, _ = place(card_image(), 12, scale=1.15, size=1920)
+    cut, _ = place(card_image(), -25, scale=1.15, off=(700, -450), size=1920)
+    ok = detect.track(cv2.resize(full[240:1680], (640, 480)))
+    bad = detect.track(cv2.resize(cut[240:1680], (640, 480)))
+    assert ok["hint"] == "ready" and not ok["cut_off"]
+    assert bad["cut_off"] and bad["hint"] != "ready"

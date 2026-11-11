@@ -145,6 +145,10 @@ Every scan (camera, upload or CLI-free API) is saved to the **scan dataset**: `s
 (`MTGSTACK_SCANS` to move it; gitignored). Each scan folder holds the photos, the straightened card, the title / type-line /
 collector crops, and `scan.json` with everything the scanner read and decided.
 
+- **▶ Live session** (`/lab/live`): camera on, show cards one at a time. Each is captured once it's steady and fully
+  in frame. Answer with **Y/Space** right, **N** wrong (card picker), **1–6** pick a suggestion, **F** fix the finish, **U** bad
+  photo, **R** rescan, **S** skip; then swap in the next card. Optionally adds confirmed cards to the collection as you go.
+  Big buttons on a phone (needs `--phone` for HTTPS).
 - On the **Scan** page, mark a result **✓ Right** or **✗ Wrong — fix it** (pick the real card). Adding a card you
   corrected also records the correction.
 - In **Scanner Lab**, go through *To review* with the keyboard: **Y** right, **N** wrong (opens a card picker),

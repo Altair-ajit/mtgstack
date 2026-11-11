@@ -135,10 +135,10 @@ export const api = {
   importPreview: (text: string, filename?: string) => post<ImportPreview>("/api/import/preview", { text, filename }),
   importCommit: (rows: ImportRow[], dest: Record<string, unknown>) =>
     post<{ cards: number; rows: number; deck?: string; allocations: Allocation[] }>("/api/import/commit", { rows, dest }),
-  scan: (files: Blob[]) => {
+  scan: (files: Blob[], source = "scan") => {
     const fd = new FormData();
     files.forEach((f, i) => fd.append("files", f, `frame${i}.jpg`));
-    return fetch("/api/scan", { method: "POST", body: fd }).then(async r => {
+    return fetch(`/api/scan?source=${encodeURIComponent(source)}`, { method: "POST", body: fd }).then(async r => {
       const d = await r.json(); if (!r.ok) throw new Error(d.detail || r.statusText); return d;
     });
   },
@@ -150,7 +150,7 @@ export const api = {
 
 // ---- Scanner Lab ---------------------------------------------------------------------------------
 export interface LabSummary {
-  id: string; ts: string; source: string; status: "unreviewed" | "correct" | "wrong";
+  id: string; ts: string; source: string; status: "unreviewed" | "correct" | "wrong" | "unreadable";
   guess: { name: string | null; set_code: string | null; number: string | null; finish: Finish; confidence: number; printing_id: string | null };
   wrong_fields: string[]; truth: { name: string; set_code: string; number: string; finish: Finish; printing_id: string } | null;
 }

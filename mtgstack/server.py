@@ -211,14 +211,14 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
 
     # ---- scanner ---------------------------------------------------------------------------
     @app.post("/api/scan")
-    async def api_scan(files: list[UploadFile] = File(...), save: bool = True):
+    async def api_scan(files: list[UploadFile] = File(...), save: bool = True, source: str = "scan"):
         """Identify a card. The scan is also saved to the Scanner Lab (scan_id) so it can be labelled."""
         from . import scanlab
         from .scanner.resolve import Scanner
         data = [await f.read() for f in files]
         res = guard(lambda: Scanner(catalog, fetch_images=online).scan(data)).to_dict()
         if save:
-            res["scan_id"] = scanlab.save(data, res)
+            res["scan_id"] = scanlab.save(data, res, source=source[:20] or "scan")
         return res
 
     @app.post("/api/detect")

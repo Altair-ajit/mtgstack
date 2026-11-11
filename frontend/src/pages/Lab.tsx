@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
 import { lab } from "../api";
 import type { Finish } from "../api";
 import CardPicker from "../components/CardPicker";
@@ -8,8 +9,10 @@ import { CardImg, Empty, FINISH_LABEL, useToast } from "../ui";
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v}%`);
 
 export default function Lab() {
-  const [filter, setFilter] = useState<"unreviewed" | "wrong" | "correct" | "unreadable" | "">("unreviewed");
-  const [sel, setSel] = useState<string | null>(null);
+  const [params] = useSearchParams();
+  const linked = params.get("scan");
+  const [filter, setFilter] = useState<"unreviewed" | "wrong" | "correct" | "unreadable" | "">(linked ? "" : "unreviewed");
+  const [sel, setSel] = useState<string | null>(linked);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
@@ -48,6 +51,7 @@ export default function Lab() {
             <div className="muted">Every scan is saved with what the scanner read. Mark it right or wrong (and what it really was) — the labelled set measures every scanner change.</div>
           </div>
           <div className="actions">
+            <Link className="btn primary" to="/lab/live">▶ Live session</Link>
             <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={e => e.target.files && upload(e.target.files)} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading}>{uploading ? "Scanning…" : "Upload photos"}</button>
             <button disabled={rr?.state === "running" || !s?.reviewed} onClick={async () => { await lab.rerun(); rerun.refetch(); }}
@@ -91,7 +95,7 @@ export default function Lab() {
                 <button key={k} className={filter === k ? "on" : ""} onClick={() => { setFilter(k); setSel(null); }}>{l}</button>
               ))}
             </div>
-            {!items.length && <p className="muted pad">{filter === "unreviewed" ? "Nothing to review. Scan cards on the Scan page, or upload photos." : "Nothing here."}</p>}
+            {!items.length && <p className="muted pad">{filter === "unreviewed" ? "Nothing to review. Start a live session, scan cards on the Scan page, or upload photos." : "Nothing here."}</p>}
             {items.map(it => (
               <button key={it.id} className={`lab-item ${sel === it.id ? "on" : ""}`} onClick={() => setSel(it.id)}>
                 <img src={lab.file(it.id, "card.jpg")} alt="" onError={e => (e.currentTarget.style.visibility = "hidden")} />

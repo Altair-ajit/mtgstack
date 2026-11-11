@@ -307,9 +307,13 @@ def track(img: np.ndarray) -> dict:
     cv2.fillConvexPoly(mask, corners.astype(np.int32), 255)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     sharp = float(cv2.Laplacian(gray, cv2.CV_64F)[mask > 0].var())
-    hint = "move closer" if fill < 0.12 else "too blurry - hold still" if sharp < 60 else "ready"
+    # a corner on/over the frame edge means part of the card is out of view: the outline is a guess
+    m = 0.006 * max(w, h)
+    cut = bool(((corners[:, 0] < m) | (corners[:, 0] > w - 1 - m) | (corners[:, 1] < m) | (corners[:, 1] > h - 1 - m)).any())
+    hint = ("card is cut off - move back" if cut else "move closer" if fill < 0.12
+            else "too blurry - hold still" if sharp < 60 else "ready")
     return {"found": True, "score": score, "corners": (corners / [w, h]).round(4).tolist(),
-            "fill": round(float(fill), 3), "sharpness": round(sharp, 1), "hint": hint}
+            "fill": round(float(fill), 3), "sharpness": round(sharp, 1), "cut_off": cut, "hint": hint}
 
 
 def warp(img: np.ndarray, corners: np.ndarray | None = None) -> np.ndarray:

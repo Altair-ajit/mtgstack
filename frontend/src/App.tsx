@@ -7,6 +7,7 @@ import Decks from "./pages/Decks";
 import DeckDetail from "./pages/DeckDetail";
 import Scan from "./pages/Scan";
 import Lab from "./pages/Lab";
+import LabLive from "./pages/LabLive";
 import ImportDialog from "./components/ImportDialog";
 import AddCard from "./components/AddCard";
 import { money, useToast } from "./ui";
@@ -86,6 +87,7 @@ export default function App() {
         <Route path="/decks/:slug" element={<DeckDetail />} />
         <Route path="/scan" element={<Scan />} />
         <Route path="/lab" element={<Lab />} />
+        <Route path="/lab/live" element={<LabLive />} />
         <Route path="*" element={<Collection />} />
       </Routes>
       {importing && <ImportDialog onClose={() => setImporting(false)} />}
