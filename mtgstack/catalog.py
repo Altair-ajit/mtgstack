@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import sqlite3
+import logging
 import time
 from typing import Iterable
 
@@ -20,6 +21,7 @@ import httpx
 
 from .db import rows
 
+log = logging.getLogger("mtgstack.catalog")
 API = "https://api.scryfall.com"
 HEADERS = {"User-Agent": "mtgstack/0.1 (personal collection manager)", "Accept": "application/json"}
 
@@ -138,8 +140,23 @@ class Scryfall:
     def __init__(self, http: httpx.Client | None = None):
         self.http = http or httpx.Client(headers=HEADERS, timeout=30, follow_redirects=True)
         self._last = 0.0
+        self._down_until = 0.0  # back off after a network failure instead of erroring every lookup
 
     def get(self, path: str, **params):
+        """GET a Scryfall endpoint. Network failures return None (and pause lookups for a minute)
+        so scanning/importing keeps working from the local catalog when offline."""
+        if time.monotonic() < self._down_until:
+            return None
+        try:
+            return self._get(path, **params)
+        except (httpx.TransportError, httpx.HTTPStatusError) as e:
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500 and e.response.status_code != 429:
+                raise
+            log.warning("Scryfall unreachable (%s); using local catalog only for 60s", e.__class__.__name__)
+            self._down_until = time.monotonic() + 60
+            return None
+
+    def _get(self, path: str, **params):
         wait = 0.1 - (time.monotonic() - self._last)
         if wait > 0:
             time.sleep(wait)
@@ -183,7 +200,7 @@ class Scryfall:
         return out
 
     def bulk_url(self, kind: str = "default_cards") -> str:
-        meta = self.get("/bulk-data")
+        meta = self._get("/bulk-data")  # explicit sync: surface network errors
         for item in meta["data"]:
             if item["type"] == kind:
                 return item["download_uri"]
@@ -253,7 +270,9 @@ class Catalog:
         return [r[0] for r in self.conn.execute("SELECT DISTINCT name FROM printings")]
 
     def fuzzy_name(self, text: str, limit: int = 5) -> list[tuple[str, float]]:
-        """Best local name matches for noisy OCR text. Falls back to Scryfall fuzzy if online."""
+        """Best catalog names for noisy text. Scryfall's online fuzzy search always returns *some* card,
+        even for gibberish, so it's only consulted when local matching fails AND its answer actually
+        resembles the text."""
         from rapidfuzz import fuzz, process
         names = self.all_names()
         hits = process.extract(text, names, scorer=fuzz.WRatio, limit=limit) if names else []
@@ -262,7 +281,10 @@ class Catalog:
             try:
                 card = self.client.named(text)
                 if card:
-                    out.insert(0, (card["name"], 90.0))
+                    from rapidfuzz.distance import Levenshtein
+                    sim = 100.0 * Levenshtein.normalized_similarity(text.lower(), card["name"].lower())
+                    if sim >= 75:
+                        out.insert(0, (card["name"], sim))
             except httpx.HTTPError:
                 pass
         return out

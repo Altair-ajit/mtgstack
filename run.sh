@@ -34,6 +34,9 @@ fi
 
 if [ "$TEST" = 1 ]; then exec .venv/bin/python -m pytest -q; fi
 
+# Scanner Lab dataset lives in the repo folder (gitignored) so it's easy to find and share.
+export MTGSTACK_SCANS="${MTGSTACK_SCANS:-$PWD/scan-data}"
+
 # --- Start ----------------------------------------------------------------------------------------
 ARGS=(-m mtgstack.cli serve --port "$PORT")
 [ "$PHONE" = 1 ] && ARGS+=(--host 0.0.0.0 --https)

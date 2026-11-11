@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, lab } from "../api";
+import CardPicker from "../components/CardPicker";
 import type { Allocation, Finish } from "../api";
-import { CardImg, COND_LABEL, FINISH_LABEL, money, useToast } from "../ui";
+import { CardImg, COND_LABEL, FINISH_LABEL, Modal, money, useToast } from "../ui";
 
 interface Candidate { printing_id: string; name: string; set_code: string; set_name: string; collector_number: string; finishes: Finish[]; image: string | null; score: number }
 interface ScanResult {
+  scan_id?: string; debug?: Record<string, string>; markers?: { title_ocr?: string[]; type_ocr?: string[]; collector_ocr?: string[] };
   printing_id: string | null; name: string | null; set_code: string | null; collector_number: string | null; language: string;
   finish: Finish; finish_confidence: number; confidence: number; candidates: Candidate[]; evidence: string[]; needs_review: boolean;
 }
@@ -24,6 +26,10 @@ export default function Scan() {
   const [finish, setFinish] = useState<Finish>("nonfoil");
   const [opts, setOpts] = useState({ condition: "NM", tags: localStorage.getItem("mtg.scan.tags") || "", autoAdd: false });
   const [log, setLog] = useState<LogItem[]>([]);
+  const [orig, setOrig] = useState<{ printing_id: string | null; finish: Finish } | null>(null);
+  const [labelled, setLabelled] = useState<string | null>(null);
+  const [fixing, setFixing] = useState(false);
+  const [fixPick, setFixPick] = useState<{ printing_id: string; name: string; set_code: string; number: string; finish: Finish } | null>(null);
   const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
   const toast = useToast();
   const qc = useQueryClient();
@@ -117,7 +123,7 @@ export default function Scan() {
     setBusy(true);
     try {
       const r: ScanResult = await api.scan(frames);
-      setRes(r); setFinish(r.finish);
+      setRes(r); setFinish(r.finish); setOrig({ printing_id: r.printing_id, finish: r.finish }); setLabelled(null);
       if (opts.autoAdd && r.printing_id && !r.needs_review) await add(r, r.finish);
     } catch (e) { toast(String((e as Error).message), "err"); }
     setBusy(false);
@@ -129,8 +135,20 @@ export default function Scan() {
     await send(frames);
   };
 
+  /** Teach the Scanner Lab: right if the user kept the guess, otherwise a correction. */
+  const teach = async (r: ScanResult, fin: Finish, verdict?: "correct" | "wrong") => {
+    if (!r.scan_id || labelled === r.scan_id || !r.printing_id) return;
+    const changed = !orig || orig.printing_id !== r.printing_id || orig.finish !== fin;
+    const v = verdict || (changed ? "wrong" : "correct");
+    try {
+      await lab.label(r.scan_id, v === "wrong" ? { verdict: "wrong", printing_id: r.printing_id, finish: fin } : { verdict: "correct", finish: fin });
+      setLabelled(r.scan_id);
+    } catch { /* labelling is best-effort */ }
+  };
+
   const add = async (r: ScanResult, fin: Finish) => {
     if (!r.printing_id) return;
+    teach(r, fin);
     localStorage.setItem("mtg.scan.tags", opts.tags);
     const out = await api.addLot({ printing_id: r.printing_id, qty: 1, finish: fin, condition: opts.condition, language: r.language,
       tags: opts.tags.split(/[ ,]+/).filter(Boolean) });
@@ -187,6 +205,15 @@ export default function Scan() {
                       <span className={`conf ${res.finish_confidence >= 0.9 ? "hi" : res.finish_confidence >= 0.6 ? "mid" : "lo"}`}>finish {Math.round(res.finish_confidence * 100)}%</span>
                       <button className="primary" onClick={() => add(res, finish)}>Add to collection</button>
                     </div>
+                    {res.scan_id && (
+                      <div className="actions teach">
+                        {labelled === res.scan_id ? <span className="muted small">✓ saved to Scanner Lab</span> : <>
+                          <span className="muted small">Was it right?</span>
+                          <button className="small" onClick={() => { teach(res, finish); toast("Thanks — recorded as right"); }}>✓ Right</button>
+                          <button className="small danger" onClick={() => setFixing(true)}>✗ Wrong — fix it</button>
+                        </>}
+                      </div>
+                    )}
                     {res.candidates.length > 1 && (
                       <div className="cands">
                         {res.candidates.slice(0, 10).map(c => (
@@ -197,11 +224,18 @@ export default function Scan() {
                         ))}
                       </div>
                     )}
-                    <details><summary className="muted small">How it decided</summary><ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></details>
+                    <details><summary className="muted small">How it decided</summary>
+                      {res.debug && <div className="readings compact">
+                        {([["title", "Title", res.markers?.title_ocr], ["type_line", "Type line", res.markers?.type_ocr], ["collector", "Bottom-left", res.markers?.collector_ocr]] as const).map(([k, l, t]) =>
+                          <div key={k} className="reading"><div className="muted small">{l}</div><img src={res.debug![k]} alt={l} />
+                            <div className="ocr">{t?.length ? t.map((x, i) => <code key={i}>{x}</code>) : <span className="muted small">nothing legible</span>}</div></div>)}
+                      </div>}
+                      <ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></details>
                   </div>
                 </div>
               ) : (
-                <div><h3>Couldn't identify this card</h3><ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
+                <div><h3>Couldn't identify this card</h3>
+                  {res.scan_id && <button className="small" onClick={() => setFixing(true)}>Tell it what this card is</button>}<ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
                   <p className="muted">Try better light and fill more of the frame, or use Add cards.</p></div>
               ))}
             </div>
@@ -225,6 +259,21 @@ export default function Scan() {
           </div>
         </div>
       </main>
+      {fixing && res && (
+        <Modal title="What card is it really?" wide onClose={() => { setFixing(false); setFixPick(null); }} footer={<>
+          <button onClick={() => { setFixing(false); setFixPick(null); }}>Cancel</button>
+          <button className="primary" disabled={!fixPick} onClick={async () => {
+            if (!fixPick || !res.scan_id) return;
+            await lab.label(res.scan_id, { verdict: "wrong", printing_id: fixPick.printing_id, finish: fixPick.finish });
+            setLabelled(res.scan_id);
+            setRes({ ...res, printing_id: fixPick.printing_id, name: fixPick.name, set_code: fixPick.set_code, collector_number: fixPick.number, needs_review: false });
+            setFinish(fixPick.finish); setFixing(false); setFixPick(null);
+            toast("Correction saved to Scanner Lab — you can add the right card now");
+          }}>Save correction</button>
+        </>}>
+          <CardPicker initial={res.markers?.title_ocr?.[0] || res.name || ""} onPick={setFixPick} />
+        </Modal>
+      )}
     </div>
   );
 }

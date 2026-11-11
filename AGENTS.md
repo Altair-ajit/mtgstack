@@ -36,3 +36,8 @@ Lot rows include: `lot_id, qty, finish, condition, language, tags` (space-separa
 - Main board: `deck:<slug>`. Other boards: `deck:<slug>:side`, `deck:<slug>:commander`, `deck:<slug>:companion`, `deck:<slug>:maybe`.
 - A card is **free** if no tag on it starts with `deck:` (`is:free`).
 - Location tags: `box:<name>`, `binder`, `binder:<name>`. Disposition tags: `trade`, `sell`, `want`.
+
+## Scanner dataset
+- `GET /api/lab/stats` gives accuracy and the most common confusions. `GET /api/lab/scans?status=wrong` lists misreads, each with what OCR read.
+- `POST /api/lab/scans/{id}/label` with `{"verdict": "correct"|"wrong"|"unreadable", "printing_id", "finish"}` records ground truth.
+- `POST /api/lab/rerun` replays the scanner on labelled scans; poll `GET /api/lab/rerun` for fixed/broken counts.

@@ -6,3 +6,4 @@ demo/dist/
 *.db
 frontend/node_modules/
 frontend/dist/
+scan-data/

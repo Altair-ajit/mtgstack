@@ -114,9 +114,45 @@ _POST = re.compile(rf"\b([{RARITY_LETTERS}])\s+(\d{{3,5}}[a-z]?)\b")
 _BARE = re.compile(r"\b(\d{1,4}[a-z]?)\b")
 
 
+def binarize_variants(region: np.ndarray, scale: int = 3) -> list[tuple[str, np.ndarray]]:
+    """Several black-text-on-white renderings of a region. Real cards (foil glare, textured title bars,
+    showcase frames) defeat any single threshold; the matcher picks whichever reading makes sense."""
+    g = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY) if region.ndim == 3 else region
+    g = cv2.resize(g, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    out = []
+
+    def norm(th):  # make text dark on light, whichever polarity the region has
+        return 255 - th if th.mean() < 127 else th
+
+    _, otsu = cv2.threshold(g, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    out.append(("otsu", norm(otsu)))
+    out.append(("otsu-inv", 255 - norm(otsu)))
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8)).apply(g)
+    _, c = cv2.threshold(clahe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    out.append(("clahe", norm(c)))
+    ad = cv2.adaptiveThreshold(cv2.GaussianBlur(g, (3, 3), 0), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                               cv2.THRESH_BINARY, 31, 9)
+    out.append(("adaptive", norm(ad)))
+    return out
+
+
 def read_collector_line(card: np.ndarray) -> CollectorLine:
+    """Best single reading (first variant that parses). See read_collector_variants for all of them."""
+    variants = read_collector_variants(card)
+    return next((v for v in variants if v.ok), variants[0] if variants else CollectorLine())
+
+
+def read_collector_variants(card: np.ndarray) -> list[CollectorLine]:
     region = crop(card, "collector")
-    th = _prep_text(region)
+    out = []
+    for name, th in binarize_variants(region):
+        cl = _parse_collector(th)
+        cl.evidence.append(f"(collector OCR variant: {name})")
+        out.append(cl)
+    return out
+
+
+def _parse_collector(th: np.ndarray) -> CollectorLine:
     words = ocr_words(th)
     text = "\n".join(_join_lines(words))
     cl = CollectorLine(raw=text)
@@ -150,6 +186,20 @@ def read_collector_line(card: np.ndarray) -> CollectorLine:
             cl.number = m2.group(1).lstrip("0") or "0"
             cl.evidence.append(f"number {cl.number} (bare)")
     return cl
+
+
+def read_text_variants(card: np.ndarray, region: str, psm: int = 7) -> list[str]:
+    """Distinct cleaned OCR strings for a one-line region (title, type line) across binarizations."""
+    seen, out = set(), []
+    for _, th in binarize_variants(crop(card, region), scale=2):
+        words = [w for w in ocr_words(th, psm=psm) if re.search(r"[A-Za-z]", w["text"])]
+        text = " ".join(w["text"] for w in sorted(words, key=lambda w: w["x"]))
+        text = re.sub(r"[^A-Za-z0-9 ,'\-/]", "", text)
+        text = re.sub(r"\s{2,}", " ", text).strip()
+        if len(re.sub(r"[^A-Za-z]", "", text)) >= 3 and text.lower() not in seen:
+            seen.add(text.lower())
+            out.append(text)
+    return out
 
 
 def _join_lines(words: list[dict]) -> list[str]:

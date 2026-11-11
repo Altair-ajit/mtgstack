@@ -68,6 +68,14 @@ class Bulk(BaseModel):
     tags: list[str] = []
 
 
+class Label(BaseModel):
+    verdict: str                    # correct | wrong | unreadable
+    printing_id: str | None = None
+    finish: str | None = None
+    language: str | None = None
+    notes: str = ""
+
+
 class ImportPreview(BaseModel):
     text: str
     filename: str | None = None
@@ -203,11 +211,15 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
 
     # ---- scanner ---------------------------------------------------------------------------
     @app.post("/api/scan")
-    async def api_scan(files: list[UploadFile] = File(...)):
+    async def api_scan(files: list[UploadFile] = File(...), save: bool = True):
+        """Identify a card. The scan is also saved to the Scanner Lab (scan_id) so it can be labelled."""
+        from . import scanlab
         from .scanner.resolve import Scanner
         data = [await f.read() for f in files]
-        res = guard(lambda: Scanner(catalog, fetch_images=online).scan(data))
-        return res.to_dict()
+        res = guard(lambda: Scanner(catalog, fetch_images=online).scan(data)).to_dict()
+        if save:
+            res["scan_id"] = scanlab.save(data, res)
+        return res
 
     @app.post("/api/detect")
     async def api_detect(file: UploadFile = File(...)):
@@ -215,6 +227,71 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         from .scanner import detect
         img = detect.load(await file.read())
         return detect.track(img)
+
+    # ---- scanner lab -----------------------------------------------------------------------
+    from . import scanlab
+
+    def make_scanner():
+        from .scanner.resolve import Scanner
+        return Scanner(catalog, fetch_images=online)
+
+    @app.post("/api/lab/upload")
+    async def api_lab_upload(files: list[UploadFile] = File(...)):
+        """Bulk: each photo is scanned separately and saved for review."""
+        out = []
+        for f in files:
+            b = await f.read()
+            try:
+                r = guard(lambda: make_scanner().scan([b])).to_dict()
+            except HTTPException as e:
+                r = {"name": None, "printing_id": None, "confidence": 0, "evidence": [str(e.detail)]}
+            out.append({"scan_id": scanlab.save([b], r, source="upload"), "name": r.get("name"), "file": f.filename})
+        return {"scans": out}
+
+    @app.get("/api/lab/scans")
+    def api_lab_scans(status: str = "", limit: int = 200, offset: int = 0):
+        return scanlab.list_scans(status, limit, offset)
+
+    @app.get("/api/lab/scans/{scan_id}")
+    def api_lab_scan(scan_id: str):
+        try:
+            return scanlab.get(scan_id)
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.get("/api/lab/file/{scan_id}/{name}")
+    def api_lab_file(scan_id: str, name: str):
+        try:
+            return FileResponse(scanlab.file_path(scan_id, name), media_type="image/jpeg")
+        except KeyError as e:
+            raise HTTPException(404, str(e))
+
+    @app.post("/api/lab/scans/{scan_id}/label")
+    def api_lab_label(scan_id: str, body: Label):
+        return guard(scanlab.label, conn, scan_id, body.verdict, body.printing_id, body.finish, body.language, body.notes)
+
+    @app.delete("/api/lab/scans/{scan_id}")
+    def api_lab_delete(scan_id: str):
+        guard(scanlab.delete, scan_id)
+        return {"ok": True}
+
+    @app.get("/api/lab/stats")
+    def api_lab_stats():
+        return scanlab.stats()
+
+    @app.post("/api/lab/rerun")
+    def api_lab_rerun():
+        return scanlab.rerun(make_scanner, lock)
+
+    @app.get("/api/lab/rerun")
+    def api_lab_rerun_status():
+        return scanlab.RERUN
+
+    @app.get("/api/lab/export")
+    def api_lab_export():
+        from fastapi.responses import Response
+        return Response(scanlab.export_zip(), media_type="application/zip",
+                        headers={"Content-Disposition": "attachment; filename=mtgstack-scans.zip"})
 
     # ---- decks -----------------------------------------------------------------------------
     @app.get("/api/decks")

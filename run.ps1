@@ -44,6 +44,8 @@ if (-not $hasTess) {
 
 if ($Test) { & $venvPy -m pytest -q; exit $LASTEXITCODE }
 
+if (-not $env:MTGSTACK_SCANS) { $env:MTGSTACK_SCANS = Join-Path $PSScriptRoot "scan-data" }
+
 # --- Start ---------------------------------------------------------------------------------------
 $serveArgs = @("-m", "mtgstack.cli", "serve", "--port", "$Port")
 if ($Phone) {

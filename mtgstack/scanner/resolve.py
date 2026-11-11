@@ -29,6 +29,7 @@ class ScanResult:
     markers: dict = field(default_factory=dict)            # raw marker readings
     evidence: list[str] = field(default_factory=list)      # human-readable reasoning trail
     needs_review: bool = True
+    debug: dict = field(default_factory=dict)              # small JPEG data URIs of what was read
 
     def to_dict(self):
         return asdict(self)
@@ -46,94 +47,172 @@ class Scanner:
         self.catalog, self.fetch_images = catalog, fetch_images
 
     # ------------------------------------------------------------------------------------------
-    def scan(self, images: list[bytes | np.ndarray | str]) -> ScanResult:
-        """`images`: one photo, or a short tilt burst of the same card (enables shimmer foil detection)."""
+    def scan(self, images: list[bytes | np.ndarray | str], debug: bool = True) -> ScanResult:
+        """`images`: one photo, or a short tilt burst of the same card (enables shimmer foil detection).
+
+        Every marker is read several ways, each reading is checked against the catalog, and the readings are
+        cross-checked: a collector line (set + number) is only trusted if that printing exists AND its name
+        agrees with the title; when they disagree the stronger evidence wins; a weak result says so instead of
+        guessing.
+        """
         frames = [detect.load(i) for i in images]
         cards = [detect.warp(f) for f in frames]
         res = ScanResult()
+        idx = NameIndex.get(self.catalog)
 
-        # Orientation: edge detection gives the card upright-or-upside-down. Decide with the collector line
-        # (cards since 2015), else with whichever orientation reads a more confident title.
-        cl = markers.read_collector_line(cards[0])
-        name, name_conf = None, None
-        if not cl.ok:
-            flipped = [detect.rotate180(c) for c in cards]
-            cl2 = markers.read_collector_line(flipped[0])
-            if cl2.ok:
-                cards, cl = flipped, cl2
-                res.evidence.append("card was upside down; rotated (collector line)")
-            else:
-                n1, n2 = markers.read_name(cards[0]), markers.read_name(flipped[0])
-                if n2[1] > n1[1] + 5:
-                    cards, (name, name_conf) = flipped, n2
-                    res.evidence.append("card was upside down; rotated (title)")
-                else:
-                    name, name_conf = n1
-        res.markers["collector"] = {k: v for k, v in asdict(cl).items() if k != "evidence"}
-        res.evidence += cl.evidence
-
-        if name is None:
-            name, name_conf = markers.read_name(cards[0])
-        res.markers["name_ocr"] = {"text": name, "conf": round(name_conf, 1)}
+        # Orientation: whichever way up yields the more convincing reading.
+        best = None
+        for flipped in (False, True):
+            cs = [detect.rotate180(c) for c in cards] if flipped else cards
+            reading = self._read(cs[0], idx)
+            if best is None or reading["strength"] > best[1]["strength"]:
+                best = (cs, reading, flipped)
+            if reading["strength"] >= 2:            # confident enough; don't spend time on the other way up
+                break
+        cards, rd, flipped = best
+        if flipped:
+            res.evidence.append("card was upside down; rotated")
+        cl = rd["collector"]
+        res.markers = {"title_ocr": rd["titles"], "type_ocr": rd["types"],
+                       "collector_ocr": [v.raw for v in rd["cl_variants"]],
+                       "collector": {k: v for k, v in asdict(cl).items() if k != "evidence"} if cl else None,
+                       "name_matches": rd["name_hits"][:5],
+                       "collector_hits": [{"set": h["set_code"], "number": h["collector_number"], "name": h["name"]}
+                                          for h in rd["cl_hits"]]}
         border, bstats = markers.border_color(cards[0])
         res.markers["border"] = {"color": border, **bstats}
-        res.evidence.append(f"border looks {border}")
-        if cl.lang:
+        if cl and cl.lang:
             res.language = PRINTED_LANG.get(cl.lang, "en")
 
-        printing = None
-        # ---- 1. exact: set code + collector number -------------------------------------------
-        if cl.ok:
-            printing = self.catalog.by_set_cn(cl.set_code, cl.number, res.language)
-            if printing:
-                res.evidence.append(f"collector line -> {printing['name']} [{printing['set_code']} #{printing['collector_number']}]")
-                if name and not self._name_agrees(name, printing["name"]):
-                    res.evidence.append(f"WARNING: title OCR {name!r} disagrees with {printing['name']!r}")
-                    res.confidence = 0.6
-                else:
-                    res.confidence = 0.95
-                res.candidates = [_cand(printing, res.confidence, "set+number")]
-            else:
-                res.evidence.append(f"no printing {cl.set_code}#{cl.number} in catalog")
-
-        # ---- 2. name -> candidates -> filter by markers -> rank by art ----------------------
-        if printing is None and name:
-            matches = self.catalog.fuzzy_name(name)
-            res.markers["name_matches"] = matches[:3]
-            if matches and matches[0][1] >= 70:
-                best_name = matches[0][0]
-                res.evidence.append(f"title OCR {name!r} -> {best_name} ({matches[0][1]:.0f})")
-                cands = self.catalog.prints_by_name(best_name)
-                if cl.set_code:
-                    same_set = [c for c in cands if c["set_code"] == cl.set_code.lower()]
-                    if same_set:
-                        cands = same_set
-                        res.evidence.append(f"filtered to set {cl.set_code}")
-                lang_match = [c for c in cands if c["lang"] == res.language]
-                cands = lang_match or cands
-                by_border = [c for c in cands if c["border_color"] == border]
-                if by_border and len(by_border) < len(cands):
-                    res.evidence.append(f"border {border} narrows {len(cands)} -> {len(by_border)} printings")
-                    cands = by_border
-                ranked = self._rank_by_art(cards[0], cands)
-                res.candidates = ranked
-                if ranked:
-                    printing = self.catalog.get(ranked[0]["printing_id"])
-                    margin = ranked[0]["score"] - (ranked[1]["score"] if len(ranked) > 1 else 0)
-                    res.confidence = 0.9 if len(ranked) == 1 else min(0.85, 0.4 + margin)
-
+        printing, why = self._decide(rd, res, border, cards[0])
+        if debug:
+            res.debug = _debug_images(cards[0])
         if printing is None:
-            res.evidence.append("could not identify the card; pick from candidates or search manually")
+            res.evidence.append(why or "could not identify the card; pick from the candidates or search by name")
             return res
 
         res.printing_id, res.name = printing["id"], printing["name"]
         res.set_code, res.collector_number = printing["set_code"], printing["collector_number"]
-
-        # ---- 3. finish -------------------------------------------------------------------------
         finishes = json.loads(printing["finishes"] or "[]")
-        res.finish, res.finish_confidence = self._finish(finishes, cl, cards, border, res.evidence)
+        res.finish, res.finish_confidence = self._finish(finishes, cl or markers.CollectorLine(), cards, border, res.evidence)
         res.needs_review = res.confidence < 0.9 or res.finish_confidence < 0.8
         return res
+
+    def _read(self, card: np.ndarray, idx: "NameIndex") -> dict:
+        titles = markers.read_text_variants(card, "name")
+        types = markers.read_text_variants(card, "type_line")
+        cl_variants = markers.read_collector_variants(card)
+        # title -> best catalog names over every OCR variant
+        hits: dict[str, float] = {}
+        for t in titles:
+            for name, score in idx.match(t):
+                hits[name] = max(hits.get(name, 0.0), score)
+        name_hits = sorted(hits.items(), key=lambda kv: -kv[1])
+        # collector line -> printings that really exist (with OCR-confusion fixes on the set code)
+        cl_hits, cl_best = [], None
+        for v in cl_variants:
+            if not v.number:
+                continue
+            for code in idx.set_candidates(v.set_code):
+                p = self.catalog.by_set_cn(code, v.number, PRINTED_LANG.get(v.lang or "EN", "en"),
+                                           fetch=idx.small and bool(v.set_code))
+                if p and p["id"] not in {h["id"] for h in cl_hits}:
+                    p = dict(p)
+                    p["_code_fixed"] = code != (v.set_code or "").lower()
+                    cl_hits.append(p)
+                    cl_best = cl_best or v
+        if cl_best is None:
+            cl_best = next((v for v in cl_variants if v.ok), cl_variants[0] if cl_variants else None)
+        top = name_hits[0][1] if name_hits else 0
+        strength = (2 if top >= 80 else 1 if top >= 65 else 0) + (1 if cl_hits else 0)
+        return {"titles": titles, "types": types, "cl_variants": cl_variants, "collector": cl_best,
+                "name_hits": name_hits, "cl_hits": cl_hits, "strength": strength}
+
+    def _decide(self, rd: dict, res: ScanResult, border: str, card: np.ndarray):
+        from rapidfuzz import fuzz
+        titles, types, name_hits, cl_hits = rd["titles"], rd["types"], rd["name_hits"], rd["cl_hits"]
+        top_name, top_score = (name_hits[0] if name_hits else (None, 0.0))
+        res.evidence.append(f"title read as {titles[:3] or ['(nothing legible)']}")
+        if top_name:
+            res.evidence.append(f"best title match: {top_name} ({top_score:.0f}%)")
+
+        def title_sim(name: str) -> float:
+            return max((NameIndex.score(t, name) for t in titles), default=0.0)
+
+        def type_sim(type_line: str | None) -> float:
+            return max((fuzz.partial_ratio(t.lower(), (type_line or "").lower()) for t in types), default=0.0)
+
+        # 1. collector line that agrees with the title -> exact printing
+        for p in cl_hits:
+            sim = title_sim(p["name"])
+            if sim >= 60:
+                res.confidence = 0.97 if sim >= 80 and not p["_code_fixed"] else 0.9
+                res.evidence.append(f"collector line {p['set_code'].upper()} #{p['collector_number']} -> {p['name']}, "
+                                    f"title agrees ({sim:.0f}%)" + (" [set code OCR-corrected]" if p["_code_fixed"] else ""))
+                res.candidates = [_cand(p, res.confidence, "set + number, title agrees")]
+                return p, None
+        if cl_hits:
+            res.evidence.append("collector line read as " + ", ".join(
+                f"{p['set_code'].upper()} #{p['collector_number']} ({p['name']})" for p in cl_hits[:3])
+                + " but the title doesn't match: ignoring it")
+
+        # 2. title strong enough to name the card (type line breaks near-ties)
+        if top_name and top_score >= 65:
+            close = [(n, s) for n, s in name_hits if s >= top_score - 8][:5]
+            if len(close) > 1 and types:
+                scored = []
+                for n, s in close:
+                    pr = self.catalog.prints_by_name(n, fetch=False)
+                    scored.append((s + 0.25 * type_sim(pr[0]["type_line"] if pr else ""), n, s))
+                scored.sort(reverse=True)
+                if scored[0][1] != top_name:
+                    res.evidence.append(f"type line {types[0]!r} favours {scored[0][1]} over {top_name}")
+                top_name, top_score = scored[0][1], scored[0][2]
+            cands = self.catalog.prints_by_name(top_name, fetch=NameIndex.get(self.catalog).small)
+            if not cands:
+                return None, f"{top_name} isn't in the card database"
+            ts = type_sim(cands[0]["type_line"])
+            if types and ts < 50 and top_score < 80:
+                res.evidence.append(f"WARNING: type line {types[0]!r} doesn't look like {cands[0]['type_line']!r}")
+            # narrow the printing with whatever the collector line got right (set code or number)
+            narrowed = cands
+            for v in rd["cl_variants"]:
+                if v.set_code:
+                    same = [c for c in narrowed if c["set_code"] in NameIndex.get(self.catalog).set_candidates(v.set_code)]
+                    if same:
+                        narrowed = same
+                        res.evidence.append(f"set {same[0]['set_code'].upper()} from the collector line")
+                        break
+            for v in rd["cl_variants"]:
+                if v.number:
+                    same = [c for c in narrowed if c["collector_number"].lstrip("0") == v.number.lstrip("0")]
+                    if same:
+                        narrowed = same
+                        break
+            lang = [c for c in narrowed if c["lang"] == res.language] or narrowed
+            by_border = [c for c in lang if c["border_color"] == border]
+            pool = by_border if by_border and len(by_border) < len(lang) else lang
+            ranked = self._rank_by_art(card, pool)
+            res.candidates = ranked + [_cand(c, 0.0, "other printing") for c in cands
+                                       if c["id"] not in {r["printing_id"] for r in ranked}][:30]
+            base = 0.9 if top_score >= 85 else 0.75 if top_score >= 75 else 0.6
+            if len(pool) > 1:
+                margin = ranked[0]["score"] - ranked[1]["score"]
+                base = min(base, 0.5 + margin) if self.fetch_images else min(base, 0.7)
+            res.confidence = round(base, 2)
+            res.evidence.append(f"identified by title: {top_name} ({top_score:.0f}%), "
+                                f"{len(pool)} candidate printing(s)")
+            return self.catalog.get(ranked[0]["printing_id"]), None
+
+        # 3. not convincing: offer what we have, don't guess
+        res.confidence = 0.0
+        for n, s in name_hits[:5]:
+            for c in self.catalog.prints_by_name(n, fetch=False)[:1]:
+                res.candidates.append(_cand(c, s / 100, f"title looks {s:.0f}% like this"))
+        for p in cl_hits[:3]:
+            res.candidates.append(_cand(p, 0.3, "collector line (title disagrees)"))
+        return None, ("couldn't read the card confidently: retake with the title and bottom-left text in focus, "
+                      "or pick it from the suggestions")
 
     # ------------------------------------------------------------------------------------------
     @staticmethod
@@ -191,6 +270,105 @@ class Scanner:
             return markers.art_hash(ref)
         except Exception:
             return None
+
+
+class NameIndex:
+    """Card names + set codes from the local catalog, cached, for matching noisy OCR."""
+    _cache: dict = {}
+
+    def __init__(self, catalog: Catalog):
+        conn = catalog.conn
+        n = conn.execute("SELECT COUNT(*) FROM printings").fetchone()[0]
+        self.small = n < 20000 and catalog.online           # catalog not downloaded: allow online lookups
+        names = [r[0] for r in conn.execute("SELECT DISTINCT name FROM printings")]
+        # match against each face of double-faced cards too ("A // B" -> "A", "B")
+        self.keys, self.names = [], []
+        for nm in names:
+            for k in {nm, *[f.strip() for f in nm.split("//")]}:
+                self.keys.append(self.norm(k))
+                self.names.append(nm)
+        self.sets = {r[0] for r in conn.execute("SELECT DISTINCT set_code FROM printings")}
+        self.n = n
+
+    @classmethod
+    def get(cls, catalog: Catalog) -> "NameIndex":
+        n = catalog.conn.execute("SELECT COUNT(*) FROM printings").fetchone()[0]
+        key = id(catalog.conn)
+        if key not in cls._cache or cls._cache[key].n != n:
+            cls._cache[key] = cls(catalog)
+        return cls._cache[key]
+
+    @staticmethod
+    def norm(s: str) -> str:
+        import re
+        return re.sub(r"[^a-z0-9 ]", "", s.lower().replace("æ", "ae")).strip()
+
+    @staticmethod
+    def score(ocr: str, name: str) -> float:
+        """0-100: edit-distance similarity over the LONGER string, so short garbage can't match a long name
+        ('un ay' vs 'Aunt May' = 62) while OCR typos still score high ('Trainmg Cenler' = 87)."""
+        from rapidfuzz.distance import Levenshtein
+        a, b = NameIndex.norm(ocr), NameIndex.norm(name)
+        if not a or not b:
+            return 0.0
+        sim = lambda x, y: 100.0 * Levenshtein.normalized_similarity(x, y)
+        best = sim(a, b)
+        for face in (f.strip() for f in name.split("//")):
+            best = max(best, sim(a, NameIndex.norm(face)))
+        # OCR often adds junk at the ends (mana symbols, frame art): allow a contained match if long enough
+        if len(b) >= 6 and b in a:
+            best = max(best, 90.0)
+        return float(best)
+
+    def match(self, ocr: str, limit: int = 5) -> list[tuple[str, float]]:
+        from rapidfuzz import fuzz, process
+        q = self.norm(ocr)
+        if len(q.replace(" ", "")) < 3:
+            return []
+        out: dict[str, float] = {}
+        if self.keys:
+            for _, _, i in process.extract(q, self.keys, scorer=fuzz.ratio, limit=limit * 3):
+                nm = self.names[i]
+                out[nm] = max(out.get(nm, 0.0), self.score(ocr, nm))
+        return sorted(out.items(), key=lambda kv: -kv[1])[:limit]
+
+    CONFUSABLE = {"0": "O", "O": "0", "1": "I", "I": "1", "L": "1", "5": "S", "S": "5", "8": "B", "B": "8",
+                  "2": "Z", "Z": "2", "6": "G", "G": "6", "Q": "O", "D": "O", "U": "V", "V": "U"}
+
+    def set_candidates(self, code: str | None) -> list[str]:
+        """The OCR'd set code if real, else real codes one or two OCR-confusions away."""
+        if not code:
+            return []
+        code = code.upper()
+        if code.lower() in self.sets or self.small:
+            return [code.lower()]
+        out = []
+        for i, ch in enumerate(code):
+            if ch in self.CONFUSABLE:
+                c1 = code[:i] + self.CONFUSABLE[ch] + code[i + 1:]
+                if c1.lower() in self.sets:
+                    out.append(c1.lower())
+                for j, ch2 in enumerate(c1):
+                    if j > i and ch2 in self.CONFUSABLE:
+                        c2 = c1[:j] + self.CONFUSABLE[ch2] + c1[j + 1:]
+                        if c2.lower() in self.sets:
+                            out.append(c2.lower())
+        return list(dict.fromkeys(out))
+
+
+def _debug_images(card: np.ndarray) -> dict:
+    """What the scanner looked at, as small JPEG data URIs (shown in the UI / saved by the Scanner Lab)."""
+    import base64
+    import cv2
+
+    def uri(img, width):
+        h, w = img.shape[:2]
+        img = cv2.resize(img, (width, max(1, int(h * width / w))), interpolation=cv2.INTER_AREA)
+        ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 82])
+        return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
+
+    return {"card": uri(card, 300), "title": uri(detect.crop(card, "name"), 420),
+            "type_line": uri(detect.crop(card, "type_line"), 420), "collector": uri(detect.crop(card, "collector"), 420)}
 
 
 def fetch_image(url: str) -> bytes:

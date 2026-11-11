@@ -6,6 +6,7 @@ import Collection from "./pages/Collection";
 import Decks from "./pages/Decks";
 import DeckDetail from "./pages/DeckDetail";
 import Scan from "./pages/Scan";
+import Lab from "./pages/Lab";
 import ImportDialog from "./components/ImportDialog";
 import AddCard from "./components/AddCard";
 import { money, useToast } from "./ui";
@@ -57,6 +58,7 @@ export default function App() {
           <NavLink to="/" end>Collection</NavLink>
           <NavLink to="/decks">Decks</NavLink>
           <NavLink to="/scan">Scan</NavLink>
+          <NavLink to="/lab" className="hide-xs">Scanner Lab</NavLink>
         </nav>
         <div className="top-right">
           {summary.data && <span className="worth" title="TCGplayer market value of everything you own">{summary.data.cards.toLocaleString()} cards · <b>{money(summary.data.value)}</b></span>}
@@ -83,6 +85,7 @@ export default function App() {
         <Route path="/decks" element={<Decks />} />
         <Route path="/decks/:slug" element={<DeckDetail />} />
         <Route path="/scan" element={<Scan />} />
+        <Route path="/lab" element={<Lab />} />
         <Route path="*" element={<Collection />} />
       </Routes>
       {importing && <ImportDialog onClose={() => setImporting(false)} />}

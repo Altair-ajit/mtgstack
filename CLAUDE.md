@@ -27,17 +27,20 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 - `mtgstack/collection.py`: lots, tags, move/split/merge/update; `add()` triggers deck auto-allocation
 - `mtgstack/decks.py`: decklists, reconcile (have / to_move / to_buy), pull, send, auto_allocate
 - `mtgstack/query.py`: Scryfall-style query language over lots and deck entries
-- `mtgstack/scanner/`: detect.py (edges, any rotation), markers.py (OCR), foil.py, resolve.py
+- `mtgstack/scanner/`: detect.py (edges, any rotation), markers.py (OCR), foil.py, resolve.py (title/type/collector arbitration, NameIndex)
+- `mtgstack/scanlab.py`: scan dataset in `scan-data/` (MTGSTACK_SCANS): save, label, stats/confusions, re-run harness, export
 - `mtgstack/server.py`: REST API; serves web_dist with SPA fallback (`/classic` = the old single-file UI)
-- `frontend/src/`: `api.ts` (typed client), `pages/` (Collection, Decks, DeckDetail, Scan),
-  `components/` (Filters, CardDrawer, ImportDialog, AddCard), `ui.tsx`, `styles.css`
+- `frontend/src/`: `api.ts` (typed client), `pages/` (Collection, Decks, DeckDetail, Scan, Lab),
+  `components/` (Filters, CardDrawer, ImportDialog, AddCard, CardPicker), `ui.tsx`, `styles.css`
 
 ## Conventions
 - A collection row is printing + finish + condition + language. Lots under it differ only by tags.
 - Lots with identical attributes and tags merge automatically, so never assume a lot id survives a move.
 - Deck tags: `deck:<slug>` (main), `deck:<slug>:<board>`. A card is "free" when it has no `deck:` tag.
 - Auto-allocation only acts on cards entering the collection, never on existing ones (so overrides stick).
-- Scanner thresholds were tuned on synthetic images only; validate changes against real photos.
+- Scanner thresholds were tuned on synthetic images only. Validate changes against real photos: read the labelled
+  scans in `scan-data/` (each has `scan.json` + crops), and use Lab → Re-run (`POST /api/lab/rerun`) to compare
+  before/after. Bump `scanlab.SCANNER_VERSION` when the scanner changes.
 
 ## Not verified yet
 - Live Scryfall/Card Kingdom calls (built in a sandbox without access), and the scanner on real photos.

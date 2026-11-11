@@ -130,6 +130,29 @@ Once found, the card is flattened to a 672×936 image and these markers are read
 | Orientation | — | Upright vs upside-down: whichever way the collector line reads, else whichever way the title OCRs more confidently. |
 
 Every result includes a confidence score, ranked candidate printings, and an `evidence` list explaining each decision.
+
+**How the readings are combined.** The title, type line and collector line are read independently and must agree:
+- A set+number from the collector line is accepted only if that printing's name matches the OCR'd title (≥ 60
+  similarity). A misread number (e.g. landing on another card in the same set) is therefore rejected, not trusted.
+- Otherwise the card is identified by title (≥ 65 Levenshtein similarity); the type line breaks near-ties. Then set,
+  number, language, border and art narrow it down to the printing.
+- If neither is good enough, the scanner returns **no guess** (confidence 0) plus candidates, rather than a wrong card.
+- Scryfall's online fuzzy match is only accepted if it really resembles what was read, and lookups fall back to the
+  local catalog when Scryfall can't be reached.
+
+### Scanner Lab (`/lab`)
+Every scan (camera, upload or CLI-free API) is saved to the **scan dataset**: `scan-data/` in the repo by default
+(`MTGSTACK_SCANS` to move it; gitignored). Each scan folder holds the photos, the straightened card, the title / type-line /
+collector crops, and `scan.json` with everything the scanner read and decided.
+
+- On the **Scan** page, mark a result **✓ Right** or **✗ Wrong — fix it** (pick the real card). Adding a card you
+  corrected also records the correction.
+- In **Scanner Lab**, go through *To review* with the keyboard: **Y** right, **N** wrong (opens a card picker),
+  **U** bad photo. Each scan shows exactly what OCR read from each region, so you can see *where* it went wrong.
+- The stats show accuracy for card / printing / finish, the most common confusions (e.g. *Training Center → Aunt May*),
+  and whether confidence separates right from wrong answers.
+- **Re-run scanner on labelled scans** replays the current scanner over every labelled photo and reports what got
+  fixed and what broke, so scanner changes are measured against your real cards. **Export** zips the dataset.
 `needs_review` is set when either the identification or the finish is uncertain. In the UI, **Tilt burst** captures 6 frames while you tilt the card.
 
 ```bash

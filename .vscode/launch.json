@@ -6,26 +6,49 @@
       "type": "debugpy",
       "request": "launch",
       "module": "mtgstack.cli",
-      "args": ["serve", "--port", "8765"],
+      "args": [
+        "serve",
+        "--port",
+        "8765"
+      ],
       "justMyCode": true,
-      "console": "integratedTerminal"
+      "console": "integratedTerminal",
+      "env": {
+        "MTGSTACK_SCANS": "${workspaceFolder}/scan-data"
+      }
     },
     {
       "name": "mtgstack: website for phone (debug, HTTPS)",
       "type": "debugpy",
       "request": "launch",
       "module": "mtgstack.cli",
-      "args": ["serve", "--port", "8765", "--host", "0.0.0.0", "--https"],
+      "args": [
+        "serve",
+        "--port",
+        "8765",
+        "--host",
+        "0.0.0.0",
+        "--https"
+      ],
       "justMyCode": true,
-      "console": "integratedTerminal"
+      "console": "integratedTerminal",
+      "env": {
+        "MTGSTACK_SCANS": "${workspaceFolder}/scan-data"
+      }
     },
     {
       "name": "mtgstack: CLI (edit args)",
       "type": "debugpy",
       "request": "launch",
       "module": "mtgstack.cli",
-      "args": ["deck", "list"],
-      "console": "integratedTerminal"
+      "args": [
+        "deck",
+        "list"
+      ],
+      "console": "integratedTerminal",
+      "env": {
+        "MTGSTACK_SCANS": "${workspaceFolder}/scan-data"
+      }
     }
   ]
 }

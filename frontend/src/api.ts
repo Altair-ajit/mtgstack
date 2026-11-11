@@ -147,3 +147,49 @@ export const api = {
     return fetch("/api/detect", { method: "POST", body: fd }).then(r => r.json());
   },
 };
+
+// ---- Scanner Lab ---------------------------------------------------------------------------------
+export interface LabSummary {
+  id: string; ts: string; source: string; status: "unreviewed" | "correct" | "wrong";
+  guess: { name: string | null; set_code: string | null; number: string | null; finish: Finish; confidence: number; printing_id: string | null };
+  wrong_fields: string[]; truth: { name: string; set_code: string; number: string; finish: Finish; printing_id: string } | null;
+}
+export interface LabScan {
+  id: string; ts: string; files: string[]; summary: LabSummary;
+  result: {
+    name: string | null; set_code: string | null; collector_number: string | null; finish: Finish; language: string;
+    confidence: number; finish_confidence: number; printing_id: string | null; evidence: string[];
+    candidates: { printing_id: string; name: string; set_code: string; collector_number: string; image: string | null; score: number; why: string }[];
+    markers: { title_ocr?: string[]; type_ocr?: string[]; collector_ocr?: string[]; name_matches?: [string, number][];
+      collector_hits?: { set: string; number: string; name: string }[]; border?: { color: string } };
+  };
+  label: { verdict: string; notes: string } | null;
+}
+export interface LabStats {
+  total: number; reviewed: number; unreviewed: number; fully_correct: number | null;
+  accuracy: Record<"card" | "printing" | "finish" | "language", number | null>;
+  confusions: { guessed: string; actual: string; count: number }[];
+  avg_confidence_when_right: number | null; avg_confidence_when_wrong: number | null; scans_dir: string;
+}
+export interface Rerun {
+  state: "idle" | "running" | "done" | "error"; done: number; total: number; error: string | null;
+  report: null | { n: number; then: Record<string, number>; now: Record<string, number>; scanner_version: string;
+    fixed: { id: string; truth: string; was: string | null; now: string | null }[];
+    broken: { id: string; truth: string; was: string | null; now: string | null }[];
+    still_wrong: { id: string; truth: string; was: string | null; now: string | null; now_wrong: string[] }[] };
+}
+export const lab = {
+  list: (status = "") => get<{ total: number; items: LabSummary[] }>(`/api/lab/scans?${qs({ status })}`),
+  get: (id: string) => get<LabScan>(`/api/lab/scans/${id}`),
+  file: (id: string, name: string) => `/api/lab/file/${id}/${name}`,
+  label: (id: string, b: { verdict: "correct" | "wrong" | "unreadable"; printing_id?: string; finish?: Finish; notes?: string }) =>
+    post<LabSummary>(`/api/lab/scans/${id}/label`, b),
+  remove: (id: string) => req("DELETE", `/api/lab/scans/${id}`),
+  stats: () => get<LabStats>("/api/lab/stats"),
+  rerun: () => post<Rerun>("/api/lab/rerun"),
+  rerunStatus: () => get<Rerun>("/api/lab/rerun"),
+  upload: (files: File[]) => {
+    const fd = new FormData(); files.forEach(f => fd.append("files", f, f.name));
+    return fetch("/api/lab/upload", { method: "POST", body: fd }).then(r => r.json() as Promise<{ scans: { scan_id: string; name: string | null }[] }>);
+  },
+};
