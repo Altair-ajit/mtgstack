@@ -1,0 +1,50 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "mtgstack: run website (auto-reload)",
+      "type": "shell",
+      "command": "${workspaceFolder}/run.sh --dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "windows": {
+        "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}/run.ps1 -Dev"
+      }
+    },
+    {
+      "label": "mtgstack: run website for phone (HTTPS, same Wi-Fi)",
+      "type": "shell",
+      "command": "${workspaceFolder}/run.sh --dev --phone",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      },
+      "windows": {
+        "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}/run.ps1 -Dev -Phone"
+      }
+    },
+    {
+      "label": "mtgstack: tests",
+      "type": "shell",
+      "command": "${workspaceFolder}/run.sh --test",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": [],
+      "windows": {
+        "command": "powershell -ExecutionPolicy Bypass -File ${workspaceFolder}/run.ps1 -Test"
+      }
+    }
+  ]
+}

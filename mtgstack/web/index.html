@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mtgstack</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">mtg<b>stack</b></div>
+  <nav>
+    <button data-tab="collection" class="active">Collection</button>
+    <button data-tab="scan">Scan</button>
+    <button data-tab="decks">Decks</button>
+    <button data-tab="io">Import / Export</button>
+    <button data-tab="prices">Prices</button>
+  </nav>
+</header>
+
+<main>
+<!-- ============================== COLLECTION ============================== -->
+<section id="tab-collection" class="tab active">
+  <div class="layout">
+    <aside>
+      <h3>Tags</h3>
+      <div id="tag-list" class="tag-list"></div>
+      <h3>Add a card</h3>
+      <input id="add-name" placeholder="Card name" autocomplete="off">
+      <div id="add-prints" class="prints"></div>
+    </aside>
+    <div class="content">
+      <div class="searchbar">
+        <input id="q" placeholder='e.g.  t:creature deck:atraxa   is:dupe -tag:trade   set:mh3 is:foil price>5' autocomplete="off">
+        <button id="q-go">Search</button>
+        <button id="q-help" class="ghost" title="Query syntax">?</button>
+      </div>
+      <pre id="help" class="help hidden"></pre>
+      <div id="summary" class="summary"></div>
+
+      <div id="selbar" class="selbar hidden">
+        <span id="sel-count"></span>
+        <label>qty/lot <input id="sel-qty" type="number" min="1" placeholder="all" style="width:5em"></label>
+        <input id="sel-add" placeholder="+ tags (deck:atraxa box:2)">
+        <input id="sel-rm" placeholder="− tags (binder deck:*)">
+        <button id="sel-move">Move</button>
+        <span class="sep"></span>
+        <select id="sel-deck"><option value="">Send to deck…</option></select>
+        <select id="sel-board"><option>main</option><option>side</option><option>commander</option><option>companion</option><option>maybe</option></select>
+        <button id="sel-send" class="ghost">Send</button>
+        <button id="sel-back" class="ghost" title="Remove deck tags; the cards return to your collection">Back to collection</button>
+        <button id="sel-clear" class="ghost">Clear</button>
+      </div>
+
+      <details class="panel">
+        <summary>Split duplicates — keep N of each card in the current search, move the rest</summary>
+        <div class="row">
+          <label>keep <input id="sd-keep" type="number" value="1" min="0" style="width:4em"></label>
+          <label>per <select id="sd-by"><option value="oracle">card (any printing)</option><option value="printing">printing + finish</option></select></label>
+          <input id="sd-add" placeholder="+ tags for extras (trade)">
+          <input id="sd-rm" placeholder="− tags for extras (binder)">
+          <button id="sd-preview" class="ghost">Preview</button>
+          <button id="sd-apply">Apply</button>
+        </div>
+        <div id="sd-out"></div>
+      </details>
+
+      <div id="stacks"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== SCAN ============================== -->
+<section id="tab-scan" class="tab">
+  <div class="layout scan">
+    <div>
+      <div id="cam-wrap" class="cam hidden"><video id="cam" playsinline autoplay muted></video>
+        <canvas id="cam-overlay"></canvas><div id="cam-hint" class="cam-hint"></div></div>
+      <div class="row">
+        <button id="cam-start">Start camera</button>
+        <button id="cam-snap" disabled>Capture</button>
+        <button id="cam-burst" disabled title="Tilt the card slowly while it captures 6 frames — detects foil sheen">Tilt burst (foil check)</button>
+      </div>
+      <div class="row">
+        <label><input id="cam-track" type="checkbox" checked> track card edges</label>
+        <label><input id="cam-autocap" type="checkbox"> auto-capture when steady</label>
+        <label><input id="cam-autoburst" type="checkbox"> …as tilt burst</label>
+      </div>
+      <div class="row">
+        <label class="file">Or upload photo(s)<input id="scan-file" type="file" accept="image/*" capture="environment" multiple></label>
+      </div>
+      <p class="hint">Any angle or rotation works — the outline shows what it found. Keep the card at least ~⅓ of the frame
+        so the small print is readable. Since Magic 2015 the bottom-left line
+        (<code>KLD • EN</code> vs <code>KLD ★ EN</code>) gives set, number, language and foil. For older cards,
+        use <b>Tilt burst</b> so foil shimmer can be measured.</p>
+      <h3>Add scanned cards with</h3>
+      <div class="row">
+        <input id="scan-tags" placeholder="tags, e.g. box:bulk-1">
+        <select id="scan-cond"><option>NM</option><option>LP</option><option>MP</option><option>HP</option><option>DMG</option></select>
+        <label><input id="scan-auto" type="checkbox"> auto-add when confident</label>
+      </div>
+    </div>
+    <div>
+      <div id="scan-result" class="scan-result"><p class="muted">No scan yet.</p></div>
+      <h3>This session</h3>
+      <ol id="scan-log" class="scan-log"></ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== DECKS ============================== -->
+<section id="tab-decks" class="tab">
+  <div class="layout">
+    <aside>
+      <h3>Decks</h3>
+      <div id="deck-list"></div>
+      <h3>Import decklist</h3>
+      <input id="dk-name" placeholder="Deck name">
+      <select id="dk-format"><option value="">format</option><option>commander</option><option>standard</option><option>pioneer</option><option>modern</option><option>legacy</option><option>pauper</option></select>
+      <label class="check"><input id="dk-building" type="checkbox" checked> In progress — auto-tag new cards it needs</label>
+      <textarea id="dk-text" rows="10" placeholder="Paste from Arena, Moxfield, MTGO, Archidekt...&#10;&#10;Commander&#10;1 Atraxa, Praetors' Voice&#10;&#10;Deck&#10;1 Sol Ring (CMM) 410&#10;4 Lightning Bolt"></textarea>
+      <button id="dk-import">Import</button>
+    </aside>
+    <div class="content" id="deck-view"><p class="muted">Pick or import a deck.</p></div>
+  </div>
+</section>
+
+<!-- ============================== IMPORT / EXPORT ============================== -->
+<section id="tab-io" class="tab">
+  <div class="cards2">
+    <div class="panel">
+      <h3>Import TCGplayer app CSV</h3>
+      <p class="hint">In the TCGplayer app: Account → set export to CSV and enable <i>Product ID</i>, <i>Set Code</i>,
+        <i>Card Number</i>, <i>Printing</i>, <i>Condition</i>, <i>Language</i>. Then Collection → list → ⋮ → Send via Email.
+        ManaBox / Moxfield / Deckbox CSVs work too.</p>
+      <input id="io-file" type="file" accept=".csv,text/csv">
+      <input id="io-tags" placeholder="tags for everything imported (e.g. from-tcg box:1)">
+      <label><input id="io-dry" type="checkbox" checked> dry run first</label>
+      <button id="io-go">Import</button>
+      <div id="io-out"></div>
+    </div>
+    <div class="panel">
+      <h3>Export</h3>
+      <input id="ex-q" placeholder="query (blank = everything)">
+      <div class="row">
+        <a id="ex-tcg" class="btn" target="_blank">TCGplayer CSV</a>
+        <a id="ex-json" class="btn" target="_blank">JSON</a>
+        <a href="/docs" class="btn ghost" target="_blank">API docs</a>
+      </div>
+      <p class="hint">Everything lives in one SQLite file (<code>~/.mtgstack/collection.db</code>) — copy it to move your collection.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================== PRICES ============================== -->
+<section id="tab-prices" class="tab">
+  <div class="row"><button id="pr-refresh">Refresh prices (Scryfall/TCGplayer + Card Kingdom)</button><span id="pr-status" class="muted"></span></div>
+  <div id="pr-value" class="value-tiles"></div>
+  <h3>Biggest movers (owned) <select id="pr-days"><option>1</option><option selected>7</option><option>30</option><option>90</option></select> days</h3>
+  <div id="pr-movers"></div>
+</section>
+</main>
+
+<div id="modal" class="modal hidden"><div class="modal-box"><button class="close" id="modal-close">×</button><div id="modal-body"></div></div></div>
+<div id="toast" class="toast hidden"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,862 @@
+[
+ {
+  "object": "card",
+  "id": "dbe65495-f8be-5865-aa55-cff83c0c026e",
+  "oracle_id": "3ac8bdcc-3712-573d-837a-894f9a029618",
+  "name": "Sol Ring",
+  "lang": "en",
+  "released_at": "2021-04-23",
+  "set": "c21",
+  "set_name": "Commander 2021",
+  "collector_number": "263",
+  "rarity": "uncommon",
+  "type_line": "Artifact",
+  "mana_cost": "{1}",
+  "cmc": 1.0,
+  "colors": [],
+  "color_identity": [],
+  "oracle_text": "{T}: Add {C}{C}.",
+  "finishes": [
+   "nonfoil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 239000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "restricted",
+   "legacy": "banned"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/c21/263.jpg",
+   "art_crop": "https://example.invalid/c21/263_art.jpg"
+  },
+  "prices": {
+   "usd": "1.50"
+  }
+ },
+ {
+  "object": "card",
+  "id": "f4d20492-28d2-5281-a64a-b1d19f1e4a8d",
+  "oracle_id": "3ac8bdcc-3712-573d-837a-894f9a029618",
+  "name": "Sol Ring",
+  "lang": "en",
+  "released_at": "2023-08-04",
+  "set": "cmm",
+  "set_name": "Commander Masters",
+  "collector_number": "410",
+  "rarity": "uncommon",
+  "type_line": "Artifact",
+  "mana_cost": "{1}",
+  "cmc": 1.0,
+  "colors": [],
+  "color_identity": [],
+  "oracle_text": "{T}: Add {C}{C}.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 500100,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "restricted",
+   "legacy": "banned"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/cmm/410.jpg",
+   "art_crop": "https://example.invalid/cmm/410_art.jpg"
+  },
+  "prices": {
+   "usd": "1.20",
+   "usd_foil": "6.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "dafe2ac4-0b1a-51f8-9d79-33230d902724",
+  "oracle_id": "3ac8bdcc-3712-573d-837a-894f9a029618",
+  "name": "Sol Ring",
+  "lang": "en",
+  "released_at": "2023-08-04",
+  "set": "cmm",
+  "set_name": "Commander Masters",
+  "collector_number": "703",
+  "rarity": "uncommon",
+  "type_line": "Artifact",
+  "mana_cost": "{1}",
+  "cmc": 1.0,
+  "colors": [],
+  "color_identity": [],
+  "oracle_text": "{T}: Add {C}{C}.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "borderless",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 500200,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "restricted",
+   "legacy": "banned"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/cmm/703.jpg",
+   "art_crop": "https://example.invalid/cmm/703_art.jpg"
+  },
+  "prices": {
+   "usd": "9.00",
+   "usd_foil": "20.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "0095cb58-af3f-5964-9927-d46593ebbe08",
+  "oracle_id": "3ac8bdcc-3712-573d-837a-894f9a029618",
+  "name": "Sol Ring",
+  "lang": "en",
+  "released_at": "2024-11-15",
+  "set": "fdc",
+  "set_name": "Foundations Jumpstart Starter",
+  "collector_number": "0057",
+  "rarity": "uncommon",
+  "type_line": "Artifact",
+  "mana_cost": "{1}",
+  "cmc": 1.0,
+  "colors": [],
+  "color_identity": [],
+  "oracle_text": "{T}: Add {C}{C}.",
+  "finishes": [
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 560000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "restricted",
+   "legacy": "banned"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/fdc/0057.jpg",
+   "art_crop": "https://example.invalid/fdc/0057_art.jpg"
+  },
+  "prices": {
+   "usd_foil": "3.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "a0c72cad-6f00-5103-8601-1889160b2d91",
+  "oracle_id": "68b2931b-cc29-5b51-a482-22a64be846c1",
+  "name": "Lightning Bolt",
+  "lang": "en",
+  "released_at": "2010-07-16",
+  "set": "m11",
+  "set_name": "Magic 2011",
+  "collector_number": "149",
+  "rarity": "common",
+  "type_line": "Instant",
+  "mana_cost": "{R}",
+  "cmc": 1.0,
+  "colors": [
+   "R"
+  ],
+  "color_identity": [
+   "R"
+  ],
+  "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2003",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 37000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "modern": "legal",
+   "legacy": "legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/m11/149.jpg",
+   "art_crop": "https://example.invalid/m11/149_art.jpg"
+  },
+  "prices": {
+   "usd": "2.00",
+   "usd_foil": "15.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "5f8140b6-28c9-5836-8e44-3b9565c28bef",
+  "oracle_id": "68b2931b-cc29-5b51-a482-22a64be846c1",
+  "name": "Lightning Bolt",
+  "lang": "en",
+  "released_at": "2021-04-23",
+  "set": "sta",
+  "set_name": "Strixhaven Mystical Archive",
+  "collector_number": "42",
+  "rarity": "rare",
+  "type_line": "Instant",
+  "mana_cost": "{R}",
+  "cmc": 1.0,
+  "colors": [
+   "R"
+  ],
+  "color_identity": [
+   "R"
+  ],
+  "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+  "finishes": [
+   "nonfoil",
+   "foil",
+   "etched"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 234000,
+  "tcgplayer_etched_id": 234001,
+  "arena_id": 75000,
+  "legalities": {
+   "commander": "legal",
+   "modern": "legal",
+   "legacy": "legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/sta/42.jpg",
+   "art_crop": "https://example.invalid/sta/42_art.jpg"
+  },
+  "prices": {
+   "usd": "3.00",
+   "usd_foil": "5.00",
+   "usd_etched": "8.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "13e706ea-fe9c-5233-9a4d-4db338a37857",
+  "oracle_id": "68b2931b-cc29-5b51-a482-22a64be846c1",
+  "name": "Lightning Bolt",
+  "lang": "en",
+  "released_at": "2020-08-07",
+  "set": "2xm",
+  "set_name": "Double Masters",
+  "collector_number": "117",
+  "rarity": "uncommon",
+  "type_line": "Instant",
+  "mana_cost": "{R}",
+  "cmc": 1.0,
+  "colors": [
+   "R"
+  ],
+  "color_identity": [
+   "R"
+  ],
+  "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 212000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "modern": "legal",
+   "legacy": "legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/2xm/117.jpg",
+   "art_crop": "https://example.invalid/2xm/117_art.jpg"
+  },
+  "prices": {
+   "usd": "1.80",
+   "usd_foil": "4.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "570d8295-a055-50e2-9812-4fb03334546e",
+  "oracle_id": "1c369568-764f-53c6-ad8e-90c29f1c6f73",
+  "name": "Counterspell",
+  "lang": "en",
+  "released_at": "2021-06-18",
+  "set": "mh2",
+  "set_name": "Modern Horizons 2",
+  "collector_number": "267",
+  "rarity": "uncommon",
+  "type_line": "Instant",
+  "mana_cost": "{U}{U}",
+  "cmc": 2.0,
+  "colors": [
+   "U"
+  ],
+  "color_identity": [
+   "U"
+  ],
+  "oracle_text": "Counter target spell.",
+  "finishes": [
+   "nonfoil",
+   "foil",
+   "etched"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 240000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/mh2/267.jpg",
+   "art_crop": "https://example.invalid/mh2/267_art.jpg"
+  },
+  "prices": {
+   "usd": "1.00",
+   "usd_foil": "2.50",
+   "usd_etched": "3.50"
+  }
+ },
+ {
+  "object": "card",
+  "id": "a190baef-4df2-534c-89f3-af245d22d254",
+  "oracle_id": "1c369568-764f-53c6-ad8e-90c29f1c6f73",
+  "name": "Counterspell",
+  "lang": "en",
+  "released_at": "2023-01-13",
+  "set": "dmr",
+  "set_name": "Dominaria Remastered",
+  "collector_number": "45",
+  "rarity": "common",
+  "type_line": "Instant",
+  "mana_cost": "{U}{U}",
+  "cmc": 2.0,
+  "colors": [
+   "U"
+  ],
+  "color_identity": [
+   "U"
+  ],
+  "oracle_text": "Counter target spell.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 470000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/dmr/45.jpg",
+   "art_crop": "https://example.invalid/dmr/45_art.jpg"
+  },
+  "prices": {
+   "usd": "0.80",
+   "usd_foil": "1.20"
+  }
+ },
+ {
+  "object": "card",
+  "id": "8abf6c64-0cd6-5b65-b96d-79edb8d5df33",
+  "oracle_id": "90dd8c0d-5d78-55c3-b69f-f37ed7b290d5",
+  "name": "Llanowar Elves",
+  "lang": "en",
+  "released_at": "2018-04-27",
+  "set": "dom",
+  "set_name": "Dominaria",
+  "collector_number": "168",
+  "rarity": "common",
+  "type_line": "Creature — Elf Druid",
+  "mana_cost": "{G}",
+  "cmc": 1.0,
+  "colors": [
+   "G"
+  ],
+  "color_identity": [
+   "G"
+  ],
+  "oracle_text": "{T}: Add {G}.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 160000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "modern": "legal",
+   "standard": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/dom/168.jpg",
+   "art_crop": "https://example.invalid/dom/168_art.jpg"
+  },
+  "prices": {
+   "usd": "0.25",
+   "usd_foil": "1.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "b27c8504-79e9-58e7-a748-69cf22d2f2bf",
+  "oracle_id": "90dd8c0d-5d78-55c3-b69f-f37ed7b290d5",
+  "name": "Llanowar Elves",
+  "lang": "en",
+  "released_at": "2024-11-15",
+  "set": "fdn",
+  "set_name": "Foundations",
+  "collector_number": "227",
+  "rarity": "common",
+  "type_line": "Creature — Elf Druid",
+  "mana_cost": "{G}",
+  "cmc": 1.0,
+  "colors": [
+   "G"
+  ],
+  "color_identity": [
+   "G"
+  ],
+  "oracle_text": "{T}: Add {G}.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 559000,
+  "tcgplayer_etched_id": null,
+  "arena_id": 91000,
+  "legalities": {
+   "commander": "legal",
+   "modern": "legal",
+   "standard": "legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/fdn/227.jpg",
+   "art_crop": "https://example.invalid/fdn/227_art.jpg"
+  },
+  "prices": {
+   "usd": "0.15",
+   "usd_foil": "0.50"
+  }
+ },
+ {
+  "object": "card",
+  "id": "ecdc191a-ff40-5dc0-9f04-2d891ce71273",
+  "oracle_id": "f55a574e-cb4b-5296-9edf-f115e6b3cb0c",
+  "name": "Swords to Plowshares",
+  "lang": "en",
+  "released_at": "2021-04-23",
+  "set": "sta",
+  "set_name": "Strixhaven Mystical Archive",
+  "collector_number": "10",
+  "rarity": "uncommon",
+  "type_line": "Instant",
+  "mana_cost": "{W}",
+  "cmc": 1.0,
+  "colors": [
+   "W"
+  ],
+  "color_identity": [
+   "W"
+  ],
+  "oracle_text": "Exile target creature. Its controller gains life equal to its power.",
+  "finishes": [
+   "nonfoil",
+   "foil",
+   "etched"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 234100,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/sta/10.jpg",
+   "art_crop": "https://example.invalid/sta/10_art.jpg"
+  },
+  "prices": {
+   "usd": "2.50",
+   "usd_foil": "4.00",
+   "usd_etched": "7.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "4869f4d2-06fb-511c-9bf0-f12cf2e82e30",
+  "oracle_id": "0361ed8e-9395-54b0-83c6-ef97404d696e",
+  "name": "Atraxa, Praetors' Voice",
+  "lang": "en",
+  "released_at": "2016-11-11",
+  "set": "c16",
+  "set_name": "Commander 2016",
+  "collector_number": "28",
+  "rarity": "mythic",
+  "type_line": "Legendary Creature — Phyrexian Angel Horror",
+  "mana_cost": "{G}{W}{U}{B}",
+  "cmc": 4.0,
+  "colors": [
+   "B",
+   "G",
+   "U",
+   "W"
+  ],
+  "color_identity": [
+   "B",
+   "G",
+   "U",
+   "W"
+  ],
+  "oracle_text": "Flying, vigilance, deathtouch, lifelink\nAt the beginning of your end step, proliferate.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 121000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/c16/28.jpg",
+   "art_crop": "https://example.invalid/c16/28_art.jpg"
+  },
+  "prices": {
+   "usd": "12.00",
+   "usd_foil": "40.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "4a8ebfd3-4731-5caa-9938-ce8c1ab74753",
+  "oracle_id": "0361ed8e-9395-54b0-83c6-ef97404d696e",
+  "name": "Atraxa, Praetors' Voice",
+  "lang": "en",
+  "released_at": "2022-07-08",
+  "set": "2x2",
+  "set_name": "Double Masters 2022",
+  "collector_number": "190",
+  "rarity": "mythic",
+  "type_line": "Legendary Creature — Phyrexian Angel Horror",
+  "mana_cost": "{G}{W}{U}{B}",
+  "cmc": 4.0,
+  "colors": [
+   "B",
+   "G",
+   "U",
+   "W"
+  ],
+  "color_identity": [
+   "B",
+   "G",
+   "U",
+   "W"
+  ],
+  "oracle_text": "Flying, vigilance, deathtouch, lifelink\nAt the beginning of your end step, proliferate.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [
+   "showcase"
+  ],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 280000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/2x2/190.jpg",
+   "art_crop": "https://example.invalid/2x2/190_art.jpg"
+  },
+  "prices": {
+   "usd": "8.00",
+   "usd_foil": "12.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "1c99a956-c097-5690-bd43-9f9a7a92a4c5",
+  "oracle_id": "5e12bf72-6ba1-5d0b-97b6-c885377e0aa5",
+  "name": "Arcane Signet",
+  "lang": "en",
+  "released_at": "2019-10-04",
+  "set": "eld",
+  "set_name": "Throne of Eldraine",
+  "collector_number": "331",
+  "rarity": "common",
+  "type_line": "Artifact",
+  "mana_cost": "{2}",
+  "cmc": 2.0,
+  "colors": [],
+  "color_identity": [],
+  "oracle_text": "{T}: Add one mana of any color in your commander's color identity.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 198000,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/eld/331.jpg",
+   "art_crop": "https://example.invalid/eld/331_art.jpg"
+  },
+  "prices": {
+   "usd": "0.60",
+   "usd_foil": "3.00"
+  }
+ },
+ {
+  "object": "card",
+  "id": "16db0b54-12bc-54db-a716-c23394d22223",
+  "oracle_id": "b11da9da-30b3-53df-8543-3c603d972007",
+  "name": "Island",
+  "lang": "en",
+  "released_at": "2024-11-15",
+  "set": "fdn",
+  "set_name": "Foundations",
+  "collector_number": "275",
+  "rarity": "common",
+  "type_line": "Basic Land — Island",
+  "mana_cost": "",
+  "cmc": 0.0,
+  "colors": [],
+  "color_identity": [],
+  "oracle_text": "({T}: Add {U}.)",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": true,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 559500,
+  "tcgplayer_etched_id": null,
+  "arena_id": 91500,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/fdn/275.jpg",
+   "art_crop": "https://example.invalid/fdn/275_art.jpg"
+  },
+  "prices": {
+   "usd": "0.05",
+   "usd_foil": "0.20"
+  }
+ },
+ {
+  "object": "card",
+  "id": "eeedc48c-b011-5d95-bcbb-73c7585d001a",
+  "oracle_id": "b11da9da-30b3-53df-8543-3c603d972007",
+  "name": "Island",
+  "lang": "en",
+  "released_at": "2024-11-15",
+  "set": "fdn",
+  "set_name": "Foundations",
+  "collector_number": "276",
+  "rarity": "common",
+  "type_line": "Basic Land — Island",
+  "mana_cost": "",
+  "cmc": 0.0,
+  "colors": [],
+  "color_identity": [],
+  "oracle_text": "({T}: Add {U}.)",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": 559501,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/fdn/276.jpg",
+   "art_crop": "https://example.invalid/fdn/276_art.jpg"
+  },
+  "prices": {
+   "usd": "0.05",
+   "usd_foil": "0.20"
+  }
+ },
+ {
+  "object": "card",
+  "id": "d0a3498b-0cf3-587e-b004-55bab54fc486",
+  "oracle_id": "68b2931b-cc29-5b51-a482-22a64be846c1",
+  "name": "Lightning Bolt",
+  "lang": "ja",
+  "released_at": "2021-04-23",
+  "set": "sta",
+  "set_name": "Strixhaven Mystical Archive",
+  "collector_number": "42",
+  "rarity": "rare",
+  "type_line": "Instant",
+  "mana_cost": "{R}",
+  "cmc": 1.0,
+  "colors": [
+   "R"
+  ],
+  "color_identity": [
+   "R"
+  ],
+  "oracle_text": "Lightning Bolt deals 3 damage to any target.",
+  "finishes": [
+   "nonfoil",
+   "foil"
+  ],
+  "border_color": "black",
+  "frame": "2015",
+  "frame_effects": [],
+  "full_art": false,
+  "promo": false,
+  "promo_types": [],
+  "tcgplayer_id": null,
+  "tcgplayer_etched_id": null,
+  "arena_id": null,
+  "legalities": {
+   "commander": "legal",
+   "vintage": "legal",
+   "legacy": "legal",
+   "modern": "not_legal"
+  },
+  "image_uris": {
+   "normal": "https://example.invalid/sta/42.jpg",
+   "art_crop": "https://example.invalid/sta/42_art.jpg"
+  },
+  "prices": {
+   "usd": "6.00"
+  }
+ }
+]

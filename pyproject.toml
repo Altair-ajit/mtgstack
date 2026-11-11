@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mtgstack"
+version = "0.1.0"
+description = "Tag-based Magic: The Gathering collection manager with a marker-based card scanner"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.110", "uvicorn>=0.29", "python-multipart", "httpx>=0.27", "ijson>=3.2", "rapidfuzz>=3.6",
+  "opencv-python-headless>=4.8", "numpy", "pillow", "pytesseract>=0.3.10", "imagehash>=4.3",
+  "cryptography>=41",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+mtgstack = "mtgstack.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["mtgstack*"]
+
+[tool.setuptools.package-data]
+mtgstack = ["web/*"]

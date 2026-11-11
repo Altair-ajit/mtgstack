@@ -1,0 +1,31 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "mtgstack: website (debug, breakpoints work)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "mtgstack.cli",
+      "args": ["serve", "--port", "8765"],
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "mtgstack: website for phone (debug, HTTPS)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "mtgstack.cli",
+      "args": ["serve", "--port", "8765", "--host", "0.0.0.0", "--https"],
+      "justMyCode": true,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "mtgstack: CLI (edit args)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "mtgstack.cli",
+      "args": ["deck", "list"],
+      "console": "integratedTerminal"
+    }
+  ]
+}
