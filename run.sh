@@ -2,13 +2,15 @@
 # mtgstack launcher for WSL / Linux / macOS. The first run sets everything up.
 #   ./run.sh            start the website at http://localhost:8765
 #   ./run.sh --dev      ...and restart automatically when you edit the code
-#   ./run.sh --phone    also reachable from your phone on the same Wi-Fi (HTTPS, so the live camera works)
+#   ./run.sh --tailscale  open it on your iPhone from anywhere via Tailscale (real HTTPS, no warnings) - recommended
+#   ./run.sh --phone    also reachable from your phone on the same Wi-Fi (self-signed HTTPS, so the live camera works)
+#   combine with --dev so the app restarts itself when code changes (e.g. after Claude pushes an update)
 #   ./run.sh --test     run the test suite
 set -euo pipefail
 cd "$(dirname "$0")"
-DEV=0; PHONE=0; TEST=0; PORT=8765
+DEV=0; PHONE=0; TS=0; TEST=0; PORT=8765
 for a in "$@"; do case "$a" in
-  --dev) DEV=1 ;; --phone) PHONE=1 ;; --test) TEST=1 ;; --port=*) PORT="${a#--port=}" ;;
+  --dev) DEV=1 ;; --phone) PHONE=1 ;; --tailscale) TS=1 ;; --test) TEST=1 ;; --port=*) PORT="${a#--port=}" ;;
   *) echo "unknown option $a"; exit 2 ;; esac; done
 
 is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
@@ -40,7 +42,10 @@ export MTGSTACK_SCANS="${MTGSTACK_SCANS:-$PWD/scan-data}"
 # --- Start ----------------------------------------------------------------------------------------
 ARGS=(-m mtgstack.cli serve --port "$PORT")
 [ "$PHONE" = 1 ] && ARGS+=(--host 0.0.0.0 --https)
+[ "$TS" = 1 ] && ARGS+=(--tailscale)
 [ "$DEV" = 1 ] && ARGS+=(--reload)
+# Files edited from Windows (or by Claude) under /mnt/c don't raise Linux file events: poll instead.
+case "$PWD" in /mnt/*) export WATCHFILES_FORCE_POLLING=true ;; esac
 URL="$([ "$PHONE" = 1 ] && echo https || echo http)://localhost:$PORT"
 ( sleep 3
   if is_wsl; then explorer.exe "$URL" >/dev/null 2>&1 || true      # opens your Windows browser

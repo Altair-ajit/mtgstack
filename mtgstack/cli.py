@@ -126,6 +126,8 @@ def main(argv=None):
     p = sub.add_parser("help", help="extra docs"); p.add_argument("topic", choices=["query"])
     p = sub.add_parser("serve", help="run web UI + API"); p.add_argument("--host", default="127.0.0.1"); p.add_argument("--port", type=int, default=8765)
     p.add_argument("--https", action="store_true", help="self-signed HTTPS so phone browsers allow live camera")
+    p.add_argument("--tailscale", action="store_true",
+                   help="publish on your tailnet with a real HTTPS certificate (tailscale serve) - best way to use a phone")
     p.add_argument("--reload", action="store_true", help="dev mode: restart when the code changes")
 
     args = ap.parse_args(argv)
@@ -306,14 +308,25 @@ def _serve(args):
         kw = dict(zip(("ssl_certfile", "ssl_keyfile"), _self_signed()))
     scheme = "https" if args.https else "http"
     print(f"mtgstack running: {scheme}://localhost:{args.port}   (API docs: /docs, stop: Ctrl+C)")
+    phone: list[dict] = []
+    if getattr(args, "tailscale", False):
+        ts = _tailscale_serve(args.port, scheme)
+        if ts.get("url"):
+            phone.append({"url": ts["url"], "kind": "tailscale"})
+            print(f"  on your phone (Tailscale, anywhere): {ts['url']}/lab/live")
+        else:
+            print("  Tailscale: " + ts.get("error", "not available"))
     if args.host in ("0.0.0.0", "::"):
         wsl = _wsl_network()
         for ip in (wsl["windows_ips"] if wsl else _lan_ips()):
+            phone.append({"url": f"{scheme}://{ip}:{args.port}", "kind": "lan"})
             print(f"  on your phone (same Wi-Fi): {scheme}://{ip}:{args.port}")
         if wsl and wsl["mode"] == "nat":
             print(_wsl_portproxy_help(wsl, args.port))
         if args.https:
             print("  the certificate is self-signed: accept the browser warning once per device")
+    import json as _json
+    os.environ["MTGSTACK_PHONE_URLS"] = _json.dumps(phone)   # shown as QR codes in the app (Phone button)
     if args.reload:   # dev mode: restart when code changes
         if args.db:
             os.environ["MTGSTACK_DB"] = args.db
@@ -326,6 +339,39 @@ def _serve(args):
     from .server import create_app
     uvicorn.run(create_app(args.db, online=not args.offline), host=args.host, port=args.port,
                 log_level="warning", **kw)
+
+
+def _tailscale_exe() -> str | None:
+    import shutil
+    for c in ("tailscale", "tailscale.exe", "/mnt/c/Program Files/Tailscale/tailscale.exe"):
+        p = shutil.which(c) or (c if Path(c).is_file() else None)
+        if p:
+            return p
+    return None
+
+
+def _tailscale_serve(port: int, scheme: str = "http") -> dict:
+    """Publish localhost:port on this machine's tailnet name with a real (Let's Encrypt) certificate, so a phone on
+    the same tailnet gets https://<pc>.<tailnet>.ts.net with no certificate warning, from any network.
+    Under WSL this drives the Windows Tailscale app; Windows forwards its localhost to WSL."""
+    import json
+    import subprocess
+    exe = _tailscale_exe()
+    if not exe:
+        return {"error": "tailscale not found - install it on this PC and on your phone (tailscale.com/download)"}
+    target = f"{'https+insecure' if scheme == 'https' else 'http'}://127.0.0.1:{port}"
+    try:
+        r = subprocess.run([exe, "serve", "--bg", target], capture_output=True, text=True, timeout=30)
+        out = (r.stdout + r.stderr).strip()
+        if "not enabled" in out.lower() or r.returncode != 0:
+            link = next((w for w in out.split() if w.startswith("https://login.tailscale.com")), "")
+            return {"error": ("HTTPS/Serve isn't enabled on your tailnet yet - open " + link + " once, then restart.")
+                    if link else out or "tailscale serve failed"}
+        st = json.loads(subprocess.run([exe, "status", "--json"], capture_output=True, text=True, timeout=15).stdout)
+        name = (st.get("Self") or {}).get("DNSName", "").rstrip(".")
+        return {"url": f"https://{name}"} if name else {"error": "couldn't read this machine's tailnet name"}
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        return {"error": f"tailscale: {e}"}
 
 
 def _lan_ips() -> list[str]:

@@ -3,10 +3,11 @@
 
     .\run.ps1           start the website at http://localhost:8765
     .\run.ps1 -Dev      same, and restart automatically when you edit the code
+    .\run.ps1 -Tailscale  open it on your iPhone from anywhere via Tailscale (real HTTPS, no warnings)
     .\run.ps1 -Phone    also reachable from your phone on the same Wi-Fi, over HTTPS so the live camera works
     .\run.ps1 -Test     run the test suite
 #>
-param([switch]$Dev, [switch]$Phone, [switch]$Test, [int]$Port = 8765)
+param([switch]$Dev, [switch]$Phone, [switch]$Tailscale, [switch]$Test, [int]$Port = 8765)
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
@@ -52,6 +53,7 @@ if ($Phone) {
     $serveArgs += @("--host", "0.0.0.0", "--https")
     Write-Host "If Windows Firewall asks, allow Python on PRIVATE networks so your phone can connect." -ForegroundColor Yellow
 }
+if ($Tailscale) { $serveArgs += "--tailscale" }
 if ($Dev) { $serveArgs += "--reload" }
 $url = if ($Phone) { "https://localhost:$Port" } else { "http://localhost:$Port" }
 Start-Job -ScriptBlock { param($u) Start-Sleep -Seconds 3; Start-Process $u } -ArgumentList $url | Out-Null

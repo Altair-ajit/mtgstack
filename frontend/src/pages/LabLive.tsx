@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api, lab } from "../api";
 import type { Finish } from "../api";
 import CardPicker from "../components/CardPicker";
+import PhoneDialog from "../components/PhoneDialog";
 import { useCardCamera } from "../components/useCardCamera";
 import { CardImg, FINISH_LABEL, useToast } from "../ui";
 
@@ -31,6 +32,8 @@ export default function LabLive() {
   const [fixing, setFixing] = useState(false);
   const [fixPick, setFixPick] = useState<Pick | null>(null);
   const [done, setDone] = useState<Done[]>([]);
+  const [phone, setPhone] = useState(false);
+  const onPhone = typeof navigator !== "undefined" && /iPhone|iPad|Android/i.test(navigator.userAgent);
   const toast = useToast();
   const qc = useQueryClient();
   const answerRef = useRef<HTMLElement>(null);
@@ -123,6 +126,7 @@ export default function LabLive() {
           <div className="actions">
             <div className="tally"><b>{judged.length}</b> cards · <b className="up">{right}</b> right · <b className="down">{judged.length - right}</b> wrong
               {judged.length > 0 && <> · <b>{Math.round(100 * right / judged.length)}%</b></>}</div>
+            {!onPhone && <button onClick={() => setPhone(true)}>📱 Use your phone</button>}
             <Link className="btn" to="/lab">Done → Lab</Link>
           </div>
         </div>
@@ -236,6 +240,7 @@ export default function LabLive() {
           </>
         )}
       </main>
+      {phone && <PhoneDialog onClose={() => setPhone(false)} />}
     </div>
   );
 }

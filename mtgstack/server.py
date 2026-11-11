@@ -4,7 +4,9 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+import os
+
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -438,6 +440,28 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         threading.Thread(target=run, daemon=True).start()
         return sync_job
 
+    @app.get("/api/phone")
+    def api_phone(request: Request):
+        """Addresses a phone can open (set by `serve`), for the QR codes in the Phone dialog."""
+        import json as _json
+        try:
+            urls = _json.loads(os.environ.get("MTGSTACK_PHONE_URLS") or "[]")
+        except ValueError:
+            urls = []
+        from urllib.parse import urlparse
+        host = request.url.hostname or ""
+        # behind `tailscale serve` the request arrives as plain http with the ts.net host: don't list it twice
+        if host not in ("localhost", "127.0.0.1") and not any(urlparse(u["url"]).hostname == host for u in urls):
+            urls.insert(0, {"url": str(request.base_url).rstrip("/"), "kind": "current"})
+        return {"urls": urls, "secure": request.url.scheme == "https" or any(u["kind"] == "tailscale" for u in urls)}
+
+    @app.get("/api/version")
+    def api_version():
+        """Changes whenever the UI is rebuilt or the scanner changes, so open pages can offer a reload."""
+        idx = DIST / "index.html"
+        stamp = int(idx.stat().st_mtime) if idx.exists() else 0
+        return {"build": f"{scanlab.SCANNER_VERSION}-{stamp}", "scanner": scanlab.SCANNER_VERSION}
+
     @app.get("/api/summary")
     def api_summary():
         with lock:
@@ -496,19 +520,26 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
     if DIST.exists():
         app.mount("/assets", StaticFiles(directory=DIST / "assets"), name="assets")
 
+    import mimetypes
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
+    NOCACHE = {"Cache-Control": "no-cache"}   # index.html must be re-checked so phones pick up new builds
+
+    def _index():
+        return FileResponse(DIST / "index.html" if (DIST / "index.html").exists() else WEB / "index.html", headers=NOCACHE)
+
     @app.get("/")
     def index():
-        return FileResponse(DIST / "index.html" if (DIST / "index.html").exists() else WEB / "index.html")
+        return _index()
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
         """Client-side routes (/decks/foo, /card/...) all load the React app."""
         if path.startswith("api/"):
             raise HTTPException(404, "no such endpoint")
-        f = DIST / path
-        if DIST.exists() and f.is_file():
-            return FileResponse(f)
-        return FileResponse(DIST / "index.html" if (DIST / "index.html").exists() else WEB / "index.html")
+        f = (DIST / path).resolve()
+        if DIST.exists() and f.is_file() and f.is_relative_to(DIST.resolve()):
+            return FileResponse(f, headers=NOCACHE if f.suffix in (".webmanifest", ".html") else None)
+        return _index()
 
     app.state.conn = conn
     return app

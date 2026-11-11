@@ -4,6 +4,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { lab } from "../api";
 import type { Finish } from "../api";
 import CardPicker from "../components/CardPicker";
+import PhoneDialog from "../components/PhoneDialog";
 import { CardImg, Empty, FINISH_LABEL, useToast } from "../ui";
 
 const pct = (v: number | null | undefined) => (v === null || v === undefined ? "—" : `${v}%`);
@@ -14,6 +15,7 @@ export default function Lab() {
   const [filter, setFilter] = useState<"unreviewed" | "wrong" | "correct" | "unreadable" | "">(linked ? "" : "unreviewed");
   const [sel, setSel] = useState<string | null>(linked);
   const [uploading, setUploading] = useState(false);
+  const [phone, setPhone] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const qc = useQueryClient();
   const toast = useToast();
@@ -52,6 +54,7 @@ export default function Lab() {
           </div>
           <div className="actions">
             <Link className="btn primary" to="/lab/live">▶ Live session</Link>
+            <button className="hide-xs" onClick={() => setPhone(true)}>📱 On your phone</button>
             <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={e => e.target.files && upload(e.target.files)} />
             <button onClick={() => fileRef.current?.click()} disabled={uploading}>{uploading ? "Scanning…" : "Upload photos"}</button>
             <button disabled={rr?.state === "running" || !s?.reviewed} onClick={async () => { await lab.rerun(); rerun.refetch(); }}
@@ -114,6 +117,7 @@ export default function Lab() {
           </section>
         </div>
       </main>
+      {phone && <PhoneDialog onClose={() => setPhone(false)} />}
     </div>
   );
 }

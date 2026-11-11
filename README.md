@@ -63,6 +63,24 @@ calls go to the Python server on :8765, so keep that running too). Run *build fr
 
 ---
 
+## Using your iPhone (scanning + Scanner Lab training)
+The app runs on your PC; the phone is just the camera and screen. Two ways in:
+
+**Tailscale (recommended)** — real HTTPS, no certificate warnings, works on any network (home Wi-Fi, cellular).
+1. Install Tailscale on the PC (Windows app) and on the iPhone (App Store); sign in to the same account on both.
+2. In WSL: `./run.sh --tailscale --dev`. The first time it prints a link to turn on HTTPS/Serve for your tailnet; open
+   it, click enable, run the command again. It prints `https://<your-pc>.<tailnet>.ts.net/lab/live`.
+   (Under the hood: `tailscale serve --bg http://127.0.0.1:8765`, which Windows forwards into WSL. If calling the Windows
+   Tailscale from WSL fails, run that line yourself in PowerShell.)
+3. In the app on the PC: **⋯ → Open on your phone** shows a QR code. Scan it with the iPhone camera.
+
+**Same Wi-Fi only** — `./run.sh --phone --dev`, then the QR code. The certificate is self-signed: in Safari tap
+*Show Details → visit this website* once. Under WSL NAT networking you also need the one-time port-forward it prints.
+
+On the iPhone, Safari → Share → **Add to Home Screen** gives a full-screen app icon. `--dev` restarts the server when
+the code changes (e.g. after a `git pull`), and open pages show a **Reload** bar when a new version is live. Scans go to
+`scan-data/` on the PC either way.
+
 ## 1. Tag-based storage
 
 | Concept | What it is |

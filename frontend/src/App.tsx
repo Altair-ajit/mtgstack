@@ -10,6 +10,8 @@ import Lab from "./pages/Lab";
 import LabLive from "./pages/LabLive";
 import ImportDialog from "./components/ImportDialog";
 import AddCard from "./components/AddCard";
+import PhoneDialog from "./components/PhoneDialog";
+import UpdateBanner from "./components/UpdateBanner";
 import { money, useToast } from "./ui";
 
 function CatalogBanner() {
@@ -49,6 +51,7 @@ export default function App() {
   const [importing, setImporting] = useState(false);
   const [adding, setAdding] = useState(false);
   const [menu, setMenu] = useState(false);
+  const [phone, setPhone] = useState(false);
   const qc = useQueryClient();
   const toast = useToast();
   return (
@@ -59,7 +62,7 @@ export default function App() {
           <NavLink to="/" end>Collection</NavLink>
           <NavLink to="/decks">Decks</NavLink>
           <NavLink to="/scan">Scan</NavLink>
-          <NavLink to="/lab" className="hide-xs">Scanner Lab</NavLink>
+          <NavLink to="/lab"><span className="hide-xs">Scanner&nbsp;</span>Lab</NavLink>
         </nav>
         <div className="top-right">
           {summary.data && <span className="worth" title="TCGplayer market value of everything you own">{summary.data.cards.toLocaleString()} cards · <b>{money(summary.data.value)}</b></span>}
@@ -70,6 +73,7 @@ export default function App() {
             {menu && (
               <div className="menu" onMouseLeave={() => setMenu(false)}>
                 <button className="show-sm" onClick={() => { setMenu(false); setAdding(true); }}>+ Add cards</button>
+                <button onClick={() => { setMenu(false); setPhone(true); }}>📱 Open on your phone</button>
                 <button onClick={async () => { setMenu(false); toast("Refreshing prices…", "info"); try { await fetch("/api/prices/refresh", { method: "POST" }); qc.invalidateQueries(); toast("Prices updated"); } catch { toast("Price refresh failed", "err"); } }}>Refresh prices</button>
                 <button onClick={async () => { setMenu(false); await api.syncCatalog(); qc.invalidateQueries({ queryKey: ["catalog-status"] }); }}>Re-download card database</button>
                 <a href="/api/export/tcgplayer" target="_blank">Export collection (TCGplayer CSV)</a>
@@ -80,6 +84,7 @@ export default function App() {
           </div>
         </div>
       </header>
+      <UpdateBanner />
       <CatalogBanner />
       <Routes>
         <Route path="/" element={<Collection />} />
@@ -92,6 +97,7 @@ export default function App() {
       </Routes>
       {importing && <ImportDialog onClose={() => setImporting(false)} />}
       {adding && <AddCard onClose={() => setAdding(false)} />}
+      {phone && <PhoneDialog onClose={() => setPhone(false)} />}
     </div>
   );
 }

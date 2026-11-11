@@ -107,8 +107,12 @@ const qs = (o: Record<string, unknown>) =>
   new URLSearchParams(Object.entries(o).flatMap(([k, v]) =>
     v === undefined || v === null || v === "" || (Array.isArray(v) && !v.length) ? [] : [[k, Array.isArray(v) ? v.join(",") : String(v)]])).toString();
 
+export interface PhoneInfo { urls: { url: string; kind: "tailscale" | "lan" | "current" }[]; secure: boolean }
+
 export const api = {
   summary: () => get<Summary>("/api/summary"),
+  phone: () => get<PhoneInfo>("/api/phone"),
+  version: () => get<{ build: string; scanner: string }>("/api/version"),
   catalogStatus: () => get<CatalogStatus>("/api/catalog/status"),
   syncCatalog: () => post("/api/catalog/sync"),
   cards: (q: string, f: Filters, sort: string, page: number, size: number, facets = true) =>
