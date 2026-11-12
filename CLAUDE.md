@@ -53,3 +53,7 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 - Build: `python scripts/build_pages.py --out site --base /mtgstack/` + `python -m mtgstack.cli build-catalog site/data`.
   Test locally: serve the parent dir so the site is at /mtgstack/, then drive it with Playwright (see tests notes).
 - Pyodide version is pinned in both `scripts/build_pages.py` and `worker.js` (PYODIDE path).
+
+## Next: local card-recognition model
+Plan, data pipeline, training and on-device integration are in `docs/scanner-model-plan.md` (train on the local
+RTX 4070 Ti Super in WSL; ship an int8 ONNX embedder + index; run with onnxruntime-web on the phone).
