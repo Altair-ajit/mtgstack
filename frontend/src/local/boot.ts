@@ -4,7 +4,7 @@ export const LOCAL = import.meta.env.VITE_LOCAL === "1";
 export const BUILD = import.meta.env.VITE_BUILD || "dev";
 const BASE = import.meta.env.BASE_URL;
 
-type Pending = { port: MessagePort };
+type Pending = { port: MessagePort; timer: number };
 
 function show(msg: string, err = false) {
   const el = document.getElementById("boot");
@@ -39,21 +39,33 @@ export async function bootLocal(): Promise<void> {
   const ready = new Promise<void>((ok, bad) => {
     worker.onmessage = e => {
       const m = e.data;
-      if (m.type === "progress") { if (!document.body.classList.contains("booted")) show(m.msg); else hint(m.msg); }
+      if (m.type === "progress") { if (!document.body.classList.contains("booted")) show(m.msg); }
+      else if (m.type === "scanner") {
+        // shown once while it loads, and only where the camera is used
+        if (m.state === "loading" && /\/(scan|lab)/.test(location.pathname)) hint("Loading the scanner (first time only)…");
+        else if (m.state === "error") hint(`Scanner couldn't load: ${m.msg}`, 8000);
+        else hint("");
+      }
       else if (m.type === "ready") ok();
       else if (m.type === "error") { show(`Couldn't start: ${m.msg}`, true); bad(new Error(m.msg)); }
       else if (m.type === "api") {
         const p = pending.get(m.id);
         pending.delete(m.id);
-        p?.port.postMessage({ status: m.status, headers: m.headers, body: m.body }, [m.body]);
-        hint("");
+        if (p) { clearTimeout(p.timer); p.port.postMessage({ status: m.status, headers: m.headers, body: m.body }, [m.body]); }
       }
     };
   });
   navigator.serviceWorker.addEventListener("message", e => {
     if (e.data?.type !== "api") return;
     const id = ++n;
-    pending.set(id, { port: e.ports[0] });
+    const port = e.ports[0];
+    // never leave the UI hanging: if Python doesn't answer (e.g. the worker was killed), fail the request
+    const timer = window.setTimeout(() => {
+      pending.delete(id);
+      const body = new TextEncoder().encode(JSON.stringify({ detail: "The app didn't respond. Reload to restart it." })).buffer;
+      port.postMessage({ status: 504, headers: [["content-type", "application/json"]], body }, [body]);
+    }, 120000);
+    pending.set(id, { port, timer });
     const { method, url, headers, body } = e.data;
     worker.postMessage({ type: "api", id, method, url, headers, body }, body ? [body] : []);
   });
@@ -76,13 +88,28 @@ export async function bootLocal(): Promise<void> {
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") flush(); });
   window.addEventListener("pagehide", flush);
 
+  worker.onerror = ev => {
+    console.error("worker crashed", ev);
+    crashed(String((ev as ErrorEvent).message || "out of memory?"));
+  };
+
   await ready;
   document.body.classList.add("booted");
   boot.remove();
 }
 
-let hintEl: HTMLDivElement | null = null;
-function hint(msg: string) {
+function crashed(msg: string) {
+  const el = document.createElement("div");
+  el.className = "banner crash";
+  el.innerHTML = `<span>The app's engine stopped (${msg}). Your data is saved.</span>`;
+  const b = Object.assign(document.createElement("button"), { className: "primary", textContent: "Reload" });
+  b.onclick = () => location.reload();
+  el.appendChild(b);
+  document.body.prepend(el);
+}
+
+let hintEl: HTMLDivElement | null = null, hintTimer = 0;
+function hint(msg: string, ms = 0) {
   if (!hintEl) {
     hintEl = document.createElement("div");
     hintEl.className = "boot-hint";
@@ -90,4 +117,6 @@ function hint(msg: string) {
   }
   hintEl.textContent = msg;
   hintEl.style.display = msg ? "block" : "none";
+  clearTimeout(hintTimer);
+  if (msg && ms) hintTimer = window.setTimeout(() => hint(""), ms);
 }

@@ -58,3 +58,18 @@ asyncio.run(go())
     out = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     assert out.stdout.split() == ["2", "404"]
+
+
+def test_phone_catalog_is_slim(tmp_path):
+    from mtgstack.catalog_build import build
+    cards = json.loads(FIX.read_text())
+    digital = dict(cards[0], id="00000000-0000-0000-0000-00000000d161", games=["arena"], collector_number="A-1")
+    src = tmp_path / "cards.json"
+    src.write_text(json.dumps(cards + [digital]))
+    meta = build(tmp_path / "out", src, cardkingdom=False, log=lambda *_: None)
+    raw = tmp_path / "x.sqlite"
+    raw.write_bytes(gzip.decompress((tmp_path / "out" / meta["file"]).read_bytes()))
+    c = sqlite3.connect(raw)
+    assert not c.execute("SELECT 1 FROM printings WHERE id=?", (digital["id"],)).fetchone()       # Arena-only dropped
+    assert not c.execute("SELECT 1 FROM current_prices WHERE source='cardmarket'").fetchone()      # USD only
+    assert all("not_legal" not in (r[0] or "") for r in c.execute("SELECT legalities FROM printings"))

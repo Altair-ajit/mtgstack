@@ -79,7 +79,9 @@ def flatten(card: dict) -> dict:
         "image_small": imgs.get("small"),
         "image_normal": imgs.get("normal"),
         "image_art_crop": imgs.get("art_crop"),
-        "legalities": json.dumps(card.get("legalities") or {}),
+        # only formats where it's playable: ~480 -> ~120 bytes/printing, same answers for legal:<format>
+        "legalities": json.dumps({k: v for k, v in (card.get("legalities") or {}).items() if v != "not_legal"},
+                                 separators=(",", ":")),
     }
 
 
@@ -295,7 +297,7 @@ class Catalog:
         return out
 
     # ---- bulk ------------------------------------------------------------------------------
-    def sync_bulk(self, kind: str = "default_cards", progress=None, url: str | None = None) -> int:
+    def sync_bulk(self, kind: str = "default_cards", progress=None, url: str | None = None, keep=None) -> int:
         """Download Scryfall's bulk file once and load every printing + today's prices locally.
         progress(bytes_done, bytes_total, cards_loaded) is called as it goes."""
         import ijson
@@ -318,6 +320,8 @@ class Catalog:
 
             batch = []
             for card in _bulk_cards(chunks()):
+                if keep and not keep(card):
+                    continue
                 batch.append(card)
                 if len(batch) >= 5000:
                     n += upsert_cards(self.conn, batch, tracked=tracked)

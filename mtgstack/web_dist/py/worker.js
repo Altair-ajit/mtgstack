@@ -30,15 +30,23 @@ function save() {
 }
 
 // ---- scanner deps (loaded after the app is usable) ---------------------------------------------------------------
-let scannerReady = null;
+let scannerReady = null, scannerFailedAt = 0;
 function loadScanner() {
   if (scannerReady) return scannerReady;
+  if (Date.now() - scannerFailedAt < 30000) return Promise.reject(new Error("the scanner failed to load - try again in a moment"));
+  post({ type: "scanner", state: "loading" });
   scannerReady = (async () => {
     await py.loadPackage(["opencv-python", "numpy"], { messageCallback: () => {} });
     await initOcr();
     B.enable_scanner();
+    post({ type: "scanner", state: "ready" });
   })();
-  scannerReady.catch(e => { console.error("scanner load failed", e); scannerReady = null; });
+  scannerReady.catch(e => {
+    console.error("scanner load failed", e);
+    scannerReady = null;
+    scannerFailedAt = Date.now();
+    post({ type: "scanner", state: "error", msg: String(e.message || e) });
+  });
   return scannerReady;
 }
 
@@ -67,6 +75,136 @@ self.mtgOcr = (png, psm) => {
   return api.GetTSVText() || "";
 };
 
+// ---- card database file on disk (OPFS) -------------------------------------------------------------------------
+// The catalog is ~250 MB. Holding it in memory (and copying it into IndexedDB) can exhaust an iPhone's memory, so
+// when the browser supports synchronous OPFS file handles, SQLite reads and writes the file on disk directly through
+// this tiny Emscripten filesystem: /catalog/catalog.sqlite -> whichever OPFS file is current.
+const CAT_DIR = "/catalog", CAT_NAME = "catalog.sqlite";
+const opfs = { root: null, files: new Map(), current: null };   // files: name in /catalog -> SyncAccessHandle
+
+async function opfsProbe() {
+  try {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle("mtgstack-probe", { create: true });
+    const h = await fh.createSyncAccessHandle();
+    const ok = typeof h.getSize() === "number";          // older Safari had an async (promise) variant
+    h.close();
+    await root.removeEntry("mtgstack-probe");
+    return ok ? root : null;
+  } catch { return null; }
+}
+
+// SQLite reads 4 KB pages; each OPFS read has fixed overhead, so read 1 MB blocks and keep the most recent 48 MB.
+const BLOCK = 1 << 20, MAX_BLOCKS = 48;
+const blockCache = new WeakMap();                        // SyncAccessHandle -> Map(blockIndex -> Uint8Array)
+function blocks(h) { let m = blockCache.get(h); if (!m) blockCache.set(h, (m = new Map())); return m; }
+function getBlock(h, i) {
+  const m = blocks(h);
+  let b = m.get(i);
+  if (b) { m.delete(i); m.set(i, b); return b; }        // LRU: move to newest
+  const len = Math.max(0, Math.min(BLOCK, h.getSize() - i * BLOCK));
+  b = new Uint8Array(len);
+  if (len) h.read(b, { at: i * BLOCK });
+  m.set(i, b);
+  if (m.size > MAX_BLOCKS) m.delete(m.keys().next().value);
+  return b;
+}
+function cachedRead(h, out, position) {
+  let done = 0;
+  while (done < out.length) {
+    const pos = position + done, i = Math.floor(pos / BLOCK), b = getBlock(h, i), off = pos - i * BLOCK;
+    if (off >= b.length) break;                          // end of file
+    const n = Math.min(out.length - done, b.length - off);
+    out.set(b.subarray(off, off + n), done);
+    done += n;
+  }
+  return done;
+}
+function cachedWrite(h, data, position) {
+  const n = h.write(data, { at: position });
+  const m = blocks(h);
+  for (let i = Math.floor(position / BLOCK); i <= Math.floor((position + data.length) / BLOCK); i++) m.delete(i);
+  return n;
+}
+
+function OpfsFS(FS) {
+  const E = n => new FS.ErrnoError(n);                    // 44 ENOENT, 28 EINVAL, 63 EPERM
+  const handle = node => { const h = opfs.files.get(node.name); if (!h) throw E(44); return h; };
+  const fs = {
+    mount() { return fs.createNode(null, "/", 0o40777, 0); },
+    createNode(parent, name, mode, dev) {
+      const node = FS.createNode(parent, name, mode, dev);
+      node.node_ops = fs.node_ops;
+      node.stream_ops = fs.stream_ops;
+      node.timestamp = Date.now();
+      return node;
+    },
+    node_ops: {
+      getattr(node) {
+        const dir = FS.isDir(node.mode), t = new Date(node.timestamp);
+        const size = dir ? 4096 : handle(node).getSize();
+        return { dev: 1, ino: node.id, mode: node.mode, nlink: 1, uid: 0, gid: 0, rdev: 0, size,
+                 atime: t, mtime: t, ctime: t, blksize: 4096, blocks: Math.ceil(size / 4096) };
+      },
+      setattr(node, attr) {
+        if (attr.size !== undefined && !FS.isDir(node.mode)) { const h = handle(node); h.truncate(attr.size); blocks(h).clear(); }
+        if (attr.timestamp !== undefined) node.timestamp = attr.timestamp;
+        if (attr.mtime !== undefined) node.timestamp = attr.mtime;
+      },
+      lookup(parent, name) {
+        if (!opfs.files.has(name)) throw E(44);
+        return fs.createNode(parent, name, 0o100666, 0);
+      },
+      mknod() { throw E(63); },
+      rename() { throw E(63); },
+      unlink() { throw E(63); },
+      rmdir() { throw E(63); },
+      readdir() { return [".", "..", ...opfs.files.keys()]; },
+      symlink() { throw E(63); },
+    },
+    stream_ops: {
+      read(stream, buffer, offset, length, position) {
+        return cachedRead(handle(stream.node), buffer.subarray(offset, offset + length), position);
+      },
+      write(stream, buffer, offset, length, position) {
+        return cachedWrite(handle(stream.node), buffer.subarray(offset, offset + length), position);
+      },
+      llseek(stream, offset, whence) {
+        let p = offset;
+        if (whence === 1) p += stream.position;
+        else if (whence === 2) p += handle(stream.node).getSize();
+        if (p < 0) throw E(28);
+        return p;
+      },
+      fsync(stream) { handle(stream.node).flush(); },
+    },
+  };
+  return fs;
+}
+
+async function readText(name) {
+  try { return await (await (await opfs.root.getFileHandle(name)).getFile()).text(); } catch { return null; }
+}
+async function writeText(name, text) {
+  const h = await (await opfs.root.getFileHandle(name, { create: true })).createSyncAccessHandle();
+  const b = new TextEncoder().encode(text);
+  h.truncate(0); h.write(b, { at: 0 }); h.flush(); h.close();
+}
+async function openOpfs(name) {
+  return (await opfs.root.getFileHandle(name, { create: true })).createSyncAccessHandle();
+}
+
+/** Mount /catalog backed by OPFS (returns its path), or null to fall back to /data (IndexedDB, in memory). */
+async function setupCatalogStorage() {
+  opfs.root = await opfsProbe();
+  if (!opfs.root) return null;
+  opfs.current = (await readText("catalog-current.txt")) || "catalog-a.sqlite";
+  opfs.files.set(CAT_NAME, await openOpfs(opfs.current));
+  py.FS.mkdirTree(CAT_DIR);
+  py.FS.mount(OpfsFS(py.FS), {}, CAT_DIR);
+  return `${CAT_DIR}/${CAT_NAME}`;
+}
+
 // ---- card database ------------------------------------------------------------------------------------------------
 async function fetchRemoteCatalog() {
   try {
@@ -93,17 +231,45 @@ async function downloadCatalog() {
       },
     });
     const reader = r.body.pipeThrough(counter).pipeThrough(new DecompressionStream("gzip")).getReader();
-    const tmp = "/data/catalog.new";
-    const stream = py.FS.open(tmp, "w");
-    try {
+    if (opfs.root) {
+      const next = opfs.current === "catalog-a.sqlite" ? "catalog-b.sqlite" : "catalog-a.sqlite";
+      const h = await openOpfs(next);
+      h.truncate(0);
+      let at = 0;
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        py.FS.write(stream, value, 0, value.length);
+        h.write(value, { at });
+        at += value.length;
       }
-    } finally { py.FS.close(stream); }
-    await enqueue(async () => { B.swap_catalog(tmp, meta.version, meta.printings); });
-    await syncfs(false);
+      h.flush();
+      if (meta.size && at !== meta.size) { h.close(); throw new Error(`download incomplete (${at} of ${meta.size} bytes)`); }
+      const old = opfs.current;
+      await enqueue(async () => {
+        B.close();                                     // SQLite lets go of the old file
+        opfs.files.get(CAT_NAME).close();
+        opfs.files.set(CAT_NAME, h);
+        opfs.current = next;
+        B.after_catalog_swap(meta.version, meta.printings, null);
+      });
+      await writeText("catalog-current.txt", next);
+      try { await opfs.root.removeEntry(old); } catch { /* leftover is harmless; reused next time */ }
+    } else {
+      // No OPFS: build the file in one preallocated buffer (no repeated growth/copies), then hand it to the FS.
+      const buf = new Uint8Array(meta.size || 0);
+      let at = 0, extra = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (at + value.length <= buf.length) buf.set(value, at); else extra.push(value);
+        at += value.length;
+      }
+      const data = extra.length ? new Uint8Array(await new Blob([buf.subarray(0, buf.length), ...extra]).arrayBuffer()) : buf.subarray(0, at);
+      const tmp = "/data/catalog.new";
+      py.FS.writeFile(tmp, data, { canOwn: true });
+      await enqueue(async () => { B.close(); B.after_catalog_swap(meta.version, meta.printings, tmp); });
+    }
+    await save();
     Object.assign(job, { state: "done", cards: meta.printings });
   } catch (e) {
     console.error(e);
@@ -130,10 +296,7 @@ async function api({ method, url, headers, body }) {
     if (remote && remote.version !== local) { downloadCatalog(); return json(200, { updating: true, version: remote.version }); }
     return json(200, { up_to_date: true, version: local });
   }
-  if (NEEDS_SCANNER.test(path)) {
-    progress("Loading the scanner (first time only)…");
-    await loadScanner();
-  }
+  if (NEEDS_SCANNER.test(path)) await loadScanner();
   const res = await enqueue(async () => {
     const r = await handle(method, url, headers, body ? new Uint8Array(body) : null);
     const [status, hdrs, out] = r.toJs();
@@ -187,13 +350,18 @@ const ready = (async () => {
     py.FS.mkdirTree("/data");
     py.FS.mount(py.FS.filesystems.IDBFS, {}, "/data");
     await syncfs(true);
-    py.runPython("import sys; sys.path.insert(0, '/app')");
+    const catPath = await setupCatalogStorage();
+    if (catPath) {
+      try { py.FS.unlink("/data/catalog.sqlite"); await save(); } catch { /* none from an older version */ }
+    }
+    py.runPython("import sys, os; sys.path.insert(0, '/app')");
+    py.globals.get("os").environ.__setitem__("MTGSTACK_CATALOG_DB", catPath || "/data/catalog.sqlite");
     B = py.pyimport("mtgstack.browser");
     B.start();
     handle = B.handle;
     post({ type: "ready" });
     fetchRemoteCatalog();
-    setTimeout(() => loadScanner(), 1500);          // warm up the scanner in the background
+    setTimeout(() => loadScanner().catch(() => {}), 1500);   // warm up the scanner in the background
   } catch (e) {
     console.error(e);
     post({ type: "error", msg: String(e.message || e) });

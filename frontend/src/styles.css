@@ -355,3 +355,4 @@ button.big, .btn.big { font-size: 16px; padding: 10px 18px; }
   .top-right .primary { padding: 6px 10px; }
   .logo { font-size: 16px; flex: none; }
 }
+.banner.crash { position: sticky; top: 0; z-index: 1001; background: #fde4e1; border-color: #f3b4ae; }

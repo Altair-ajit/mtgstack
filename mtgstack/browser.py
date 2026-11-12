@@ -100,6 +100,8 @@ def start() -> None:
     """Configure the environment and build the FastAPI app (call once after /data is mounted)."""
     global APP
     os.makedirs(DATA, exist_ok=True)
+    global CATALOG_DB
+    CATALOG_DB = os.environ.get("MTGSTACK_CATALOG_DB") or CATALOG_DB    # worker.js: OPFS file or /data copy
     os.environ.update(MTGSTACK_BROWSER="1", MTGSTACK_DB=USER_DB, MTGSTACK_CATALOG_DB=CATALOG_DB,
                       MTGSTACK_SCANS=f"{DATA}/scans")
     install_shims()
@@ -124,10 +126,15 @@ def close() -> None:
 
 
 def swap_catalog(new_path: str, version: str, printings: int) -> dict:
-    """Replace the card catalog with a freshly downloaded one, keeping the collection. Records today's prices in
-    the history of every card you own or want (the desktop app does this when it refreshes prices)."""
     close()
-    os.replace(new_path, CATALOG_DB)
+    return after_catalog_swap(version, printings, new_path)
+
+
+def after_catalog_swap(version: str, printings: int, new_path: str | None = None) -> dict:
+    """The worker has put a freshly downloaded card catalog in place (call close() first). Reopen, keeping the
+    collection, and record today's prices in the history of every card you own or want."""
+    if new_path:
+        os.replace(new_path, CATALOG_DB)
     start()
     conn = APP.state.conn
     conn.execute("""INSERT OR IGNORE INTO prices (printing_id, finish, source, kind, price, currency, as_of)

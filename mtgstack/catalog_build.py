@@ -17,14 +17,24 @@ from . import db
 from .catalog import Catalog, upsert_cards
 
 
-def build(out_dir: str | Path, cards_json: str | Path | None = None, cardkingdom: bool = True, log=print) -> dict:
+def paper(card: dict) -> bool:
+    """Printings you can hold: skip Arena/MTGO-only cards (they can't be scanned or collected)."""
+    games = card.get("games")
+    return not games or "paper" in games
+
+
+def build(out_dir: str | Path, cards_json: str | Path | None = None, cardkingdom: bool = True, log=print,
+          phone: bool = True) -> dict:
+    """phone=True keeps the download small for phones: paper printings only, USD prices only (TCGplayer + Card
+    Kingdom), compact legality data."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     raw = out / "catalog.sqlite"
     raw.unlink(missing_ok=True)
     conn = db.connect(":memory:", catalog=raw)          # catalog tables go to `raw`; user tables stay in memory
     if cards_json:
-        upsert_cards(conn, json.loads(Path(cards_json).read_text()))
+        cards = json.loads(Path(cards_json).read_text())
+        upsert_cards(conn, [c for c in cards if paper(c)] if phone else cards)
     else:
         last = [0]
 
@@ -32,13 +42,15 @@ def build(out_dir: str | Path, cards_json: str | Path | None = None, cardkingdom
             if cards - last[0] >= 20000:
                 last[0] = cards
                 log(f"  {cards:,} printings ({done / 2**20:.0f}/{total / 2**20:.0f} MB)")
-        Catalog(conn).sync_bulk(progress=progress)
+        Catalog(conn).sync_bulk(progress=progress, keep=paper if phone else None)
     if cardkingdom:
         try:
             from . import prices
             log(f"  Card Kingdom: {prices.refresh_cardkingdom(conn):,} prices")
         except Exception as e:                           # nice-to-have; TCGplayer prices come with Scryfall
             log(f"  Card Kingdom prices skipped: {e}")
+    if phone:
+        conn.execute("DELETE FROM cat.current_prices WHERE source = 'cardmarket'")
     conn.commit()
     n = conn.execute("SELECT COUNT(*) FROM cat.printings").fetchone()[0]
     conn.execute("VACUUM cat")
