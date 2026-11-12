@@ -162,6 +162,22 @@ def test_unsure_picture_falls_back_to_ocr(mcat):
     assert differs.needs_review and U("dom/90") in {c["printing_id"] for c in differs.candidates}   # ...but is questioned
 
 
+def test_plausible_picture_is_the_suggestion_when_text_is_useless(mcat):
+    img = photo(card_image("Xqzv Wkrrt", "QQQ", "999"))                 # nothing the catalog knows
+    r = Scanner(mcat, fetch_images=False, recognizer=FakeModel([U("dom/90")], score=0.56, margin=0.15)).scan([img])
+    assert r.name == "Iron Gyre" and r.recognizer == "model" and r.needs_review and r.confidence <= 0.5
+    assert r.candidates[0]["printing_id"] == U("dom/90") and not r.markers["model"]["confident"]
+
+    # too weak to be a lead (a card back, a box, a covered card): still no answer, only a candidate
+    r = Scanner(mcat, fetch_images=False, recognizer=FakeModel([U("dom/90")], score=0.9, margin=0.0)).scan([img])
+    assert r.name is None and r.needs_review and U("dom/90") in {c["printing_id"] for c in r.candidates}
+
+    # a solid OCR reading (set + number confirmed) is not displaced by a merely plausible picture
+    img = photo(card_image("Brass Orrery", "CMR", "358"))
+    r = Scanner(mcat, fetch_images=False, recognizer=FakeModel([U("dom/90")], score=0.56, margin=0.15)).scan([img])
+    assert r.printing_id == U("cmr/358") and r.recognizer == "ocr" and r.needs_review
+
+
 def test_hints_from_the_caller_and_broken_models(mcat):
     img = photo(card_image("Brass Orrery", "CMR", "358"))
     hints = [{"printing_id": U("roe/101"), "score": 0.91, "group": 1}, {"printing_id": U("cmr/358"), "score": 0.9, "group": 1},

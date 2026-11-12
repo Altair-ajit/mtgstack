@@ -24,6 +24,10 @@ log = logging.getLogger("mtgstack.recognizer")
 # (scripts/build_index.py prints the similarity of right and wrong matches); re-tune on Lab photos.
 CONFIDENT_SIM = 0.65
 CONFIDENT_MARGIN = 0.10
+# Below "confident" but still a likely answer: offered as the suggestion when reading the text found nothing
+# better. On 76 real photos (docs/scanner-model-plan.md) every wrong match was under one of these, every right one over.
+PLAUSIBLE_SIM = 0.50
+PLAUSIBLE_MARGIN = 0.11
 
 
 @dataclass
@@ -38,6 +42,10 @@ class Match:
     @property
     def confident(self) -> bool:
         return bool(self.printings) and self.score >= CONFIDENT_SIM and self.margin >= CONFIDENT_MARGIN
+
+    @property
+    def plausible(self) -> bool:
+        return bool(self.printings) and self.score >= PLAUSIBLE_SIM and self.margin >= PLAUSIBLE_MARGIN
 
     def to_dict(self) -> dict:
         return {"printings": self.printings[:40], "score": round(self.score, 3), "margin": round(self.margin, 3),

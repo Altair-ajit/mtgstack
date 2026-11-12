@@ -95,8 +95,35 @@ Done, on branch `scanner-model`:
   they fall back to OCR. Right matches: median 0.98, 5th percentile 0.95, so the 0.65 / 0.10 thresholds have room.
 - Runtime on desktop CPU: load 0.3 s, lookup ~25 ms.
 
-Not done: milestone 2/3/4 numbers on **real photos** (`scan-data/` is empty: scan and label cards in the Lab first,
-then run `eval_lab.py` and tune `recognizer.CONFIDENT_SIM/MARGIN`), on-device inference (onnxruntime-web),
+**Real photos from the web** (first real-photo check; photos kept out of the repo in `~/mtg-data/web`):
+128 phone photos = 102 from the Hugging Face dataset `andrewljohnson/magic_cards` (mostly Alpha/Beta/Unlimited, some
+in graded slabs, 48 card backs, 3 product boxes; no licence stated, so evaluation only) + 26 from the GitHub repo
+`hj3yoo/mtg_card_detector` `test_file/` (modern frames, several cards per photo, glare, sleeves). Neither has card
+labels: each match was checked by eye against the matched reference image. 76 photos show a card front.
+
+| 76 card fronts | right card | notes |
+|---|---|---|
+| OCR-only scanner | 19 (25%) | old frames have no collector line and their title font defeats Tesseract |
+| Model alone (top-1 artwork) | 72 (95%) | 64 confident, **all 64 right** |
+| Scanner with model | 72 (95%) | was 66 before the "plausible match" fallback below |
+
+- The 4 misses are not model errors: the detector cropped the wrong thing (1), the card was half covered by another
+  object (2), or the crop came out sideways (1). All scored <= 0.50 with margin <= 0.10.
+- None of the 52 backs / boxes / non-cards got a confident match. Card backs come out as "Plant a Sapling" (MB2)
+  with margin 0.00, because two printings in the index have a back-like image; harmless, but a "this is the back"
+  answer would be nicer.
+- Thresholds: lowest right confident match 0.65 / 0.20; best wrong match 0.50 / 0.10 (synthetic: 0.59 / 0.14).
+  `CONFIDENT_SIM/MARGIN` stay at 0.65 / 0.10. Added `PLAUSIBLE_SIM/MARGIN` = 0.50 / 0.11: an unsure match above
+  these becomes the (needs-review, confidence 0.5) suggestion when OCR found nothing or only a shaky title. All 8
+  right-but-unsure matches were above it, all 4 wrong ones below. Small sample: re-check as Lab photos accumulate.
+- Only 4 of 76 were accepted without review: these old cards have no collector line, so the printing among
+  same-art reprints (LEA/LEB/2ED/CED...) still has to be picked by hand. Telling those apart (border colour, corner
+  radius, copyright line) is the next accuracy gain for old cards.
+- **The detector is now the weak link**: about 1 crop in 7 zoomed into the art box or came out rotated 90 degrees
+  (dark-bordered cards on dark cloth, slabs, overlapping cards). The model shrugged most of these off, but that is
+  where its confidence drops. Idea: try the detector's alternative quads / rotations and keep the best-scoring match.
+
+Not done: Lab photos from this user's own phone (`scan-data/` is empty; `eval_lab.py` is ready for them), on-device inference (onnxruntime-web),
 publishing model + index with the Pages build, embedding new printings in the daily Action, Lab UI for model vs OCR.
 
 ## Environment notes

@@ -105,7 +105,7 @@ class Scanner:
 
         printing, why = self._decide(rd, res, border, cards[0])
         if match is not None and match.printings:
-            self._merge_picture(match, printing, res)
+            printing = self._merge_picture(match, printing, res)
         if debug:
             res.debug = _debug_images(cards[0])
         if printing is None:
@@ -201,12 +201,13 @@ class Scanner:
             res.debug = _debug_images(cards[0])
         return True
 
-    def _merge_picture(self, match, printing: dict | None, res: ScanResult) -> None:
-        """The picture match was not confident enough to decide alone: let it back up or question the OCR result."""
+    def _merge_picture(self, match, printing: dict | None, res: ScanResult) -> dict | None:
+        """The picture match was not confident enough to decide alone: let it back up or question the OCR result,
+        or stand in for it when the text gave nothing solid. Returns the printing to report."""
         res.markers["model"] = match.to_dict()
         pool = [p for p in (self.catalog.get(i) for i in match.printings) if p]
         if not pool:
-            return
+            return printing
         if printing is not None and printing["oracle_id"] == pool[0]["oracle_id"]:
             res.recognizer = "model+ocr"
             if printing["id"] in match.printings:
@@ -215,7 +216,20 @@ class Scanner:
             else:
                 res.evidence.append(f"the picture looks like the {pool[0]['set_code'].upper()} "
                                     f"#{pool[0]['collector_number']} printing ({match.score:.0%} similar)")
-            return
+            return printing
+        if match.plausible and (printing is None or res.confidence < 0.8):
+            # nothing readable, or only a shaky title guess: the picture is the better lead, but ask for a check
+            if printing is not None:
+                res.evidence.append(f"the text read as {printing['name']}, but the picture looks like {pool[0]['name']}")
+            pick = pool[0]
+            ids = {p["id"] for p in pool}
+            res.candidates = ([_cand(pick, round(match.score, 3), "picture match")]
+                              + [_cand(p, round(match.score, 3), "same artwork") for p in pool[1:30]]
+                              + [c for c in res.candidates if c["printing_id"] not in ids])
+            res.evidence.append(f"picture looks like {pick['name']} ({match.score:.0%} similar, {match.margin:.0%} ahead "
+                                "of the next artwork): not a sure match, check it")
+            res.confidence, res.recognizer = 0.5, "model"
+            return pick
         have = {c["printing_id"] for c in res.candidates}
         extra = [_cand(p, round(match.score, 3), f"picture looks {match.score:.0%} like this")
                  for p in pool[:3] if p["id"] not in have]
@@ -226,6 +240,7 @@ class Scanner:
             res.evidence.append(f"the picture looks more like {pool[0]['name']} ({match.score:.0%} similar): check it")
             res.confidence = round(min(res.confidence, 0.7), 2)
             res.needs_review = True
+        return printing
 
     def _read(self, card: np.ndarray, idx: "NameIndex") -> dict:
         titles = markers.read_text_variants(card, "name")
