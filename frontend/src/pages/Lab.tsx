@@ -61,6 +61,8 @@ export default function Lab() {
             <button disabled={rr?.state === "running" || !s?.reviewed} onClick={async () => { await lab.rerun(); rerun.refetch(); }}
               title="Re-scan every labelled photo with the current scanner and compare">
               {rr?.state === "running" ? `Re-running ${rr.done}/${rr.total}…` : "Re-run scanner on labelled scans"}</button>
+            <button disabled={rr?.state === "running" || !s?.reviewed} onClick={async () => { await lab.rerun(true); rerun.refetch(); }}
+              title="Same re-run without the picture-recognition model, to compare the two">Re-run, OCR only</button>
             <a className="btn" href="/api/lab/export">Export dataset (.zip)</a>
           </div>
         </div>
@@ -73,6 +75,11 @@ export default function Lab() {
             <div className="stat-card"><span>Right finish</span><b>{pct(s.accuracy.finish)}</b></div>
             <div className="stat-card"><span>Fully correct</span><b>{pct(s.fully_correct)}</b></div>
             <div className="stat-card"><span>Confidence right / wrong</span><b className="sm">{s.avg_confidence_when_right ?? "—"} / {s.avg_confidence_when_wrong ?? "—"}</b><em>should be far apart</em></div>
+            {Object.keys(s.by_recognizer ?? {}).length > 0 && (
+              <div className="stat-card"><span>Right card by method</span>
+                <b className="sm">{Object.entries(s.by_recognizer!).map(([k, v]) => `${k} ${v.card}%`).join(" · ")}</b>
+                <em>{Object.entries(s.by_recognizer!).map(([k, v]) => `${v.n} by ${k}`).join(", ")}</em></div>
+            )}
           </div>
         )}
         {rr?.state === "done" && rr.report && (
@@ -81,7 +88,9 @@ export default function Lab() {
             {(["card", "printing", "finish"] as const).map(f => (
               <span key={f} className="rr">{f} {rr.report!.then[f]}% → <b className={rr.report!.now[f] > rr.report!.then[f] ? "up" : rr.report!.now[f] < rr.report!.then[f] ? "down" : ""}>{rr.report!.now[f]}%</b></span>
             ))}
-            <span className="muted"> · fixed {rr.report.fixed.length} · broke {rr.report.broken.length} · still wrong {rr.report.still_wrong.length}</span>
+            <span className="muted"> · fixed {rr.report.fixed.length} · broke {rr.report.broken.length} · still wrong {rr.report.still_wrong.length}
+              {" · "}{rr.report.model_version ? `model ${rr.report.model_version}` : "OCR only"}
+              {rr.report.recognizers && ` (${Object.entries(rr.report.recognizers).map(([k, n]) => `${n} by ${k}`).join(", ")})`}</span>
           </div>
         )}
         {rr?.state === "error" && <div className="error-box">Re-run failed: {rr.error}</div>}

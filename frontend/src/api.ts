@@ -177,10 +177,13 @@ export interface LabStats {
   accuracy: Record<"card" | "printing" | "finish" | "language", number | null>;
   confusions: { guessed: string; actual: string; count: number }[];
   avg_confidence_when_right: number | null; avg_confidence_when_wrong: number | null; scans_dir: string;
+  /** accuracy split by what identified the card: "ocr", "model" (picture recognition) or "model+ocr" */
+  by_recognizer?: Record<string, { n: number; card: number; printing: number; finish: number }>;
 }
 export interface Rerun {
   state: "idle" | "running" | "done" | "error"; done: number; total: number; error: string | null;
   report: null | { n: number; then: Record<string, number>; now: Record<string, number>; scanner_version: string;
+    model_version?: string | null; recognizers?: Record<string, number>;
     fixed: { id: string; truth: string; was: string | null; now: string | null }[];
     broken: { id: string; truth: string; was: string | null; now: string | null }[];
     still_wrong: { id: string; truth: string; was: string | null; now: string | null; now_wrong: string[] }[] };
@@ -193,7 +196,7 @@ export const lab = {
     post<LabSummary>(`/api/lab/scans/${id}/label`, b),
   remove: (id: string) => req("DELETE", `/api/lab/scans/${id}`),
   stats: () => get<LabStats>("/api/lab/stats"),
-  rerun: () => post<Rerun>("/api/lab/rerun"),
+  rerun: (ocrOnly = false) => post<Rerun>(`/api/lab/rerun${ocrOnly ? "?ocr_only=true" : ""}`),
   rerunStatus: () => get<Rerun>("/api/lab/rerun"),
   upload: (files: File[]) => {
     const fd = new FormData(); files.forEach(f => fd.append("files", f, f.name));
