@@ -31,6 +31,8 @@ class ScanResult:
     evidence: list[str] = field(default_factory=list)      # human-readable reasoning trail
     needs_review: bool = True
     debug: dict = field(default_factory=dict)              # small JPEG data URIs of what was read
+    recognizer: str = "ocr"                                # what identified the card: "ocr" | "model" | "model+ocr"
+    model_version: str | None = None                       # recognition model consulted (None = OCR only)
 
     def to_dict(self):
         return asdict(self)
@@ -44,22 +46,38 @@ def _cand(p: dict, score: float, why: str) -> dict:
 
 
 class Scanner:
-    def __init__(self, catalog: Catalog, fetch_images: bool = True):
+    def __init__(self, catalog: Catalog, fetch_images: bool = True, recognizer="default"):
+        """`recognizer`: a recognizer.Recognizer, None for OCR only, or "default" = the installed model if any."""
         self.catalog, self.fetch_images = catalog, fetch_images
+        if recognizer == "default":
+            from .recognizer import load_default
+            recognizer = load_default()
+        self.recognizer = recognizer
 
     # ------------------------------------------------------------------------------------------
-    def scan(self, images: list[bytes | np.ndarray | str], debug: bool = True) -> ScanResult:
+    def scan(self, images: list[bytes | np.ndarray | str], debug: bool = True,
+             hints: list[dict] | None = None, hints_version: str = "") -> ScanResult:
         """`images`: one photo, or a short tilt burst of the same card (enables shimmer foil detection).
 
         Every marker is read several ways, each reading is checked against the catalog, and the readings are
         cross-checked: a collector line (set + number) is only trusted if that printing exists AND its name
         agrees with the title; when they disagree the stronger evidence wins; a weak result says so instead of
         guessing.
+
+        With a recognition model (or `hints`: picture matches computed by the caller, best first, as
+        [{"printing_id", "score", "group"}]) the picture is looked up first. A confident match names the card
+        without reading the title, and only the collector line is read to pick the printing; an unsure match
+        falls back to the OCR pipeline and is offered among the candidates.
         """
         frames = [detect.load(i) for i in images]
         cards = [detect.warp(f) for f in frames]
         res = ScanResult()
         idx = NameIndex.get(self.catalog)
+        match = self._picture_match(cards[0], hints, hints_version)
+        if match is not None:
+            res.model_version = match.model_version or None
+            if match.confident and self._decide_by_picture(match, cards, res, idx, debug):
+                return res
 
         # Orientation: whichever way up yields the more convincing reading.
         best = None
@@ -74,7 +92,7 @@ class Scanner:
         if flipped:
             res.evidence.append("card was upside down; rotated")
         cl = rd["collector"]
-        res.markers = {"title_ocr": rd["titles"], "type_ocr": rd["types"],
+        res.markers = {**res.markers, "title_ocr": rd["titles"], "type_ocr": rd["types"],
                        "collector_ocr": [v.raw for v in rd["cl_variants"]],
                        "collector": {k: v for k, v in asdict(cl).items() if k != "evidence"} if cl else None,
                        "name_matches": rd["name_hits"][:5],
@@ -86,6 +104,8 @@ class Scanner:
             res.language = PRINTED_LANG.get(cl.lang, "en")
 
         printing, why = self._decide(rd, res, border, cards[0])
+        if match is not None and match.printings:
+            self._merge_picture(match, printing, res)
         if debug:
             res.debug = _debug_images(cards[0])
         if printing is None:
@@ -98,6 +118,114 @@ class Scanner:
         res.finish, res.finish_confidence = self._finish(finishes, cl or markers.CollectorLine(), cards, border, res.evidence)
         res.needs_review = res.confidence < 0.9 or res.finish_confidence < 0.8
         return res
+
+    # ---- picture recognition ----------------------------------------------------------------
+    def _picture_match(self, card: np.ndarray, hints, hints_version: str):
+        from .recognizer import match_from_hints
+        try:
+            if hints:
+                return match_from_hints(hints, hints_version)
+            if self.recognizer is not None:
+                return self.recognizer.match(card)
+        except Exception as e:                      # a broken model must never break scanning
+            import logging
+            logging.getLogger("mtgstack.scanner").warning("picture recognition failed: %s: %s", type(e).__name__, e)
+        return None
+
+    def _decide_by_picture(self, match, cards: list[np.ndarray], res: ScanResult, idx: "NameIndex", debug: bool) -> bool:
+        """The picture is a confident match: take the card from it and use the collector line only to choose
+        between printings that share the artwork. False = unusable (the catalog doesn't know these printings)."""
+        pool = [p for p in (self.catalog.get(i) for i in match.printings) if p]
+        if not pool:
+            return False
+        res.markers["model"] = match.to_dict()
+        res.recognizer = "model"
+        res.evidence.append(f"picture matches {pool[0]['name']} ({match.score:.0%} similar, {match.margin:.0%} ahead "
+                            f"of the next artwork); {len(pool)} printing(s) share this artwork")
+
+        def agree(v, p) -> int:
+            """How well a collector-line reading fits a printing: 2 = set and number, 1 = one of them."""
+            num = bool(v.number) and p["collector_number"].lstrip("0") == v.number.lstrip("0")
+            st = bool(v.set_code) and p["set_code"] in idx.set_candidates(v.set_code)
+            return 2 if num and st else 1 if num or st else 0
+
+        # the model is indifferent to which way up the card is, the collector line is not: read it both ways
+        best = None
+        for flipped in (False, True):
+            cs = [detect.rotate180(c) for c in cards] if flipped else cards
+            variants = markers.read_collector_variants(cs[0])
+            top = max(((agree(v, p), v, p) for v in variants for p in pool), key=lambda t: t[0], default=(0, None, None))
+            if best is None or top[0] > best[0]:
+                best = (*top, cs, variants)
+            if best[0] == 2 or (len(pool) == 1 and any(v.ok for v in variants)):
+                break
+        score, cl, hit, cards, variants = best
+        if not score:
+            cl = next((v for v in variants if v.ok), variants[0] if variants else None)
+        res.markers["collector_ocr"] = [v.raw for v in variants]
+        res.markers["collector"] = {k: v for k, v in asdict(cl).items() if k != "evidence"} if cl else None
+        border, bstats = markers.border_color(cards[0])
+        res.markers["border"] = {"color": border, **bstats}
+        if cl and cl.lang:
+            res.language = PRINTED_LANG.get(cl.lang, "en")
+
+        if score == 2:
+            printing, res.confidence = hit, 0.97
+            res.evidence.append(f"collector line {hit['set_code'].upper()} #{hit['collector_number']} confirms the printing")
+            res.recognizer = "model+ocr"
+        elif len(pool) == 1:
+            printing, res.confidence = pool[0], 0.93
+            res.evidence.append("only one printing has this artwork")
+        else:
+            narrowed = [p for p in pool if score and agree(cl, p)] or pool
+            if len(narrowed) < len(pool):
+                res.evidence.append(f"collector line narrows it to {len(narrowed)} printing(s)")
+                res.recognizer = "model+ocr"
+            lang = [p for p in narrowed if p["lang"] == res.language] or narrowed
+            by_border = [p for p in lang if p["border_color"] == border] or lang
+            printing = by_border[0]
+            res.confidence = 0.85 if len(by_border) == 1 else 0.6
+            if len(by_border) > 1:
+                res.evidence.append(f"{len(by_border)} printings look the same and the collector line didn't settle "
+                                    "which: check the set")
+        res.candidates = [_cand(printing, res.confidence, "picture match")] + [
+            _cand(p, round(match.score, 3), "same artwork") for p in pool if p["id"] != printing["id"]][:30]
+        res.printing_id, res.name = printing["id"], printing["name"]
+        res.set_code, res.collector_number = printing["set_code"], printing["collector_number"]
+        if not (cl and cl.lang):
+            res.language = printing["lang"]
+        finishes = json.loads(printing["finishes"] or "[]")
+        res.finish, res.finish_confidence = self._finish(finishes, cl or markers.CollectorLine(), cards, border, res.evidence)
+        res.needs_review = res.confidence < 0.9 or res.finish_confidence < 0.8
+        if debug:
+            res.debug = _debug_images(cards[0])
+        return True
+
+    def _merge_picture(self, match, printing: dict | None, res: ScanResult) -> None:
+        """The picture match was not confident enough to decide alone: let it back up or question the OCR result."""
+        res.markers["model"] = match.to_dict()
+        pool = [p for p in (self.catalog.get(i) for i in match.printings) if p]
+        if not pool:
+            return
+        if printing is not None and printing["oracle_id"] == pool[0]["oracle_id"]:
+            res.recognizer = "model+ocr"
+            if printing["id"] in match.printings:
+                res.confidence = round(min(0.97, res.confidence + 0.15), 2)
+                res.evidence.append(f"the picture agrees ({match.score:.0%} similar)")
+            else:
+                res.evidence.append(f"the picture looks like the {pool[0]['set_code'].upper()} "
+                                    f"#{pool[0]['collector_number']} printing ({match.score:.0%} similar)")
+            return
+        have = {c["printing_id"] for c in res.candidates}
+        extra = [_cand(p, round(match.score, 3), f"picture looks {match.score:.0%} like this")
+                 for p in pool[:3] if p["id"] not in have]
+        if printing is None:
+            res.candidates = extra + res.candidates
+        else:
+            res.candidates = res.candidates[:1] + extra + res.candidates[1:]
+            res.evidence.append(f"the picture looks more like {pool[0]['name']} ({match.score:.0%} similar): check it")
+            res.confidence = round(min(res.confidence, 0.7), 2)
+            res.needs_review = True
 
     def _read(self, card: np.ndarray, idx: "NameIndex") -> dict:
         titles = markers.read_text_variants(card, "name")

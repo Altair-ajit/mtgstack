@@ -1,8 +1,11 @@
 import json
+import os
 from pathlib import Path
 import pytest
 from mtgstack import db
 from mtgstack.catalog import Catalog, upsert_cards
+
+os.environ["MTGSTACK_MODEL"] = "/nonexistent-mtgstack-model"   # tests never pick up an installed model
 
 FIX = Path(__file__).parent / "fixtures" / "cards.json"
 

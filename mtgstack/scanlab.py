@@ -7,7 +7,11 @@ Storage is plain files so the dataset is easy to inspect, zip and share:
       <scan id>/
         photo_0.jpg ...        the original photo(s) as uploaded
         card.jpg title.jpg type_line.jpg collector.jpg   what the scanner cropped and read
-        scan.json              {id, ts, scanner_version, result (guess + OCR readings + evidence), label}
+        scan.json              {id, ts, scanner_version, recognizer, model_version,
+                                result (guess + OCR readings + evidence), label}
+
+`recognizer` says what identified the card ("ocr", "model" = the picture-recognition model, "model+ocr" = both),
+so accuracy can be compared between them on the same photos.
 """
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ import zipfile
 from collections import Counter
 from pathlib import Path
 
-SCANNER_VERSION = "2026.11.11-crosscheck"
+SCANNER_VERSION = "2026.11.12-model"
 
 
 def scans_dir() -> Path:
@@ -65,13 +69,16 @@ def save(images: list[bytes], result: dict, source: str = "scan") -> str:
         if isinstance(uri, str) and uri.startswith("data:image/jpeg;base64,"):
             (d / f"{name}.jpg").write_bytes(base64.b64decode(uri.split(",", 1)[1]))
     _write(sid, {"id": sid, "ts": dt.datetime.now().isoformat(timespec="seconds"), "source": source,
-                 "scanner_version": SCANNER_VERSION, "photos": len(images), "result": res, "label": None})
+                 "scanner_version": SCANNER_VERSION, "recognizer": res.get("recognizer") or "ocr",
+                 "model_version": res.get("model_version"), "photos": len(images), "result": res, "label": None})
     return sid
 
 
 def summary(data: dict) -> dict:
     r, lab = data["result"], data.get("label")
     return {"id": data["id"], "ts": data["ts"], "source": data.get("source"),
+            "recognizer": data.get("recognizer") or r.get("recognizer") or "ocr",
+            "model_version": data.get("model_version") or r.get("model_version"),
             "guess": {"name": r.get("name"), "set_code": r.get("set_code"), "number": r.get("collector_number"),
                       "finish": r.get("finish"), "confidence": r.get("confidence"), "printing_id": r.get("printing_id")},
             "status": "unreviewed" if not lab else lab["verdict"] if lab["verdict"] in ("correct", "unreadable") else "wrong",
@@ -164,7 +171,13 @@ def stats() -> dict:
     confusions = Counter((s["guess"]["name"] or "(no guess)", s["truth"]["name"]) for s in reviewed if "card" in s["wrong_fields"])
     conf_ok = [s["guess"]["confidence"] or 0 for s in reviewed if not s["wrong_fields"]]
     conf_bad = [s["guess"]["confidence"] or 0 for s in reviewed if s["wrong_fields"]]
+    by_rec = {}
+    for name in sorted({s["recognizer"] for s in reviewed}):
+        mine = [s for s in reviewed if s["recognizer"] == name]
+        by_rec[name] = {"n": len(mine), **{f: round(100 * sum(f not in s["wrong_fields"] for s in mine) / len(mine), 1)
+                                           for f in ("card", "printing", "finish")}}
     return {"total": len(items), "reviewed": n, "unreviewed": sum(1 for s in items if s["status"] == "unreviewed"),
+            "by_recognizer": by_rec,
             "fully_correct": round(100 * sum(1 for s in reviewed if not s["wrong_fields"]) / n, 1) if n else None,
             "accuracy": acc,
             "confusions": [{"guessed": g, "actual": a, "count": c} for (g, a), c in confusions.most_common(15)],
@@ -197,7 +210,8 @@ def rerun(make_scanner, conn_lock: threading.Lock | None = None) -> dict:
                     r = make_scanner().scan(photos, debug=False).to_dict()
                 now_wrong = compare(r, s["truth"])
                 rows.append({"id": s["id"], "truth": s["truth"]["name"], "was": s["guess"]["name"], "now": r.get("name"),
-                             "was_wrong": s["wrong_fields"], "now_wrong": now_wrong})
+                             "was_wrong": s["wrong_fields"], "now_wrong": now_wrong,
+                             "recognizer": r.get("recognizer") or "ocr", "model_version": r.get("model_version")})
                 RERUN["done"] += 1
             n = len(rows) or 1
             fields = ("card", "printing", "finish")
@@ -209,6 +223,8 @@ def rerun(make_scanner, conn_lock: threading.Lock | None = None) -> dict:
                 "broken": [r for r in rows if not r["was_wrong"] and r["now_wrong"]],
                 "still_wrong": [r for r in rows if r["was_wrong"] and r["now_wrong"]],
                 "scanner_version": SCANNER_VERSION,
+                "model_version": next((r["model_version"] for r in rows if r["model_version"]), None),
+                "recognizers": dict(Counter(r["recognizer"] for r in rows)),
             }
             RERUN["state"] = "done"
         except Exception as e:

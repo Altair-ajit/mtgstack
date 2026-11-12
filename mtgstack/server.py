@@ -1,6 +1,7 @@
 """HTTP API + web UI. `mtgstack serve` -> http://localhost:8765  (OpenAPI docs at /docs for agents)."""
 from __future__ import annotations
 
+import json
 import threading
 from pathlib import Path
 
@@ -213,12 +214,21 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
 
     # ---- scanner ---------------------------------------------------------------------------
     @app.post("/api/scan")
-    async def api_scan(files: list[UploadFile] = File(...), save: bool = True, source: str = "scan"):
-        """Identify a card. The scan is also saved to the Scanner Lab (scan_id) so it can be labelled."""
+    async def api_scan(files: list[UploadFile] = File(...), save: bool = True, source: str = "scan",
+                       hints: str = Form(""), model_version: str = Form("")):
+        """Identify a card. The scan is also saved to the Scanner Lab (scan_id) so it can be labelled.
+        `hints`: optional JSON list of picture matches the client computed with the recognition model,
+        best first: [{"printing_id", "score", "group"}]."""
         from . import scanlab
         from .scanner.resolve import Scanner
         data = [await f.read() for f in files]
-        res = guard(lambda: Scanner(catalog, fetch_images=online).scan(data)).to_dict()
+        try:
+            hint_list = [h for h in json.loads(hints) if isinstance(h, dict) and h.get("printing_id")
+                         and isinstance(h.get("score"), (int, float))][:50] if hints else None
+        except ValueError:
+            raise HTTPException(400, "hints must be a JSON list")
+        res = guard(lambda: Scanner(catalog, fetch_images=online).scan(
+            data, hints=hint_list, hints_version=model_version[:60])).to_dict()
         if save:
             res["scan_id"] = scanlab.save(data, res, source=source[:20] or "scan")
         return res
@@ -233,9 +243,9 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
     # ---- scanner lab -----------------------------------------------------------------------
     from . import scanlab
 
-    def make_scanner():
+    def make_scanner(ocr_only: bool = False):
         from .scanner.resolve import Scanner
-        return Scanner(catalog, fetch_images=online)
+        return Scanner(catalog, fetch_images=online, recognizer=None if ocr_only else "default")
 
     @app.post("/api/lab/upload")
     async def api_lab_upload(files: list[UploadFile] = File(...)):
@@ -282,8 +292,9 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         return scanlab.stats()
 
     @app.post("/api/lab/rerun")
-    def api_lab_rerun():
-        return scanlab.rerun(make_scanner, lock)
+    def api_lab_rerun(ocr_only: bool = False):
+        """Re-scan the labelled photos. `ocr_only=true` leaves the recognition model out, to compare the two."""
+        return scanlab.rerun(lambda: make_scanner(ocr_only), lock)
 
     @app.get("/api/lab/rerun")
     def api_lab_rerun_status():

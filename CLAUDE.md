@@ -27,7 +27,8 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 - `mtgstack/collection.py`: lots, tags, move/split/merge/update; `add()` triggers deck auto-allocation
 - `mtgstack/decks.py`: decklists, reconcile (have / to_move / to_buy), pull, send, auto_allocate
 - `mtgstack/query.py`: Scryfall-style query language over lots and deck entries
-- `mtgstack/scanner/`: detect.py (edges, any rotation), markers.py (OCR), foil.py, resolve.py (title/type/collector arbitration, NameIndex)
+- `mtgstack/scanner/`: detect.py (edges, any rotation), markers.py (OCR), foil.py, resolve.py (title/type/collector arbitration, NameIndex),
+  recognizer.py (optional ONNX picture match, tried before OCR), modeldata.py (manifest rows + index file format)
 - `mtgstack/scanlab.py`: scan dataset in `scan-data/` (MTGSTACK_SCANS): save, label, stats/confusions, re-run harness, export
 - `mtgstack/server.py`: REST API; serves web_dist with SPA fallback (`/classic` = the old single-file UI)
 - `frontend/src/`: `api.ts` (typed client), `pages/` (Collection, Decks, DeckDetail, Scan, Lab),
@@ -54,6 +55,10 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
   Test locally: serve the parent dir so the site is at /mtgstack/, then drive it with Playwright (see tests notes).
 - Pyodide version is pinned in both `scripts/build_pages.py` and `worker.js` (PYODIDE path).
 
-## Next: local card-recognition model
-Plan, data pipeline, training and on-device integration are in `docs/scanner-model-plan.md` (train on the local
-RTX 4070 Ti Super in WSL; ship an int8 ONNX embedder + index; run with onnxruntime-web on the phone).
+## Card-recognition model
+Plan and current status are in `docs/scanner-model-plan.md`. Pipeline (training venv `~/mtg-data/.venv-train`, data in
+`~/mtg-data`): `scripts/fetch_images.py` -> `train_embedder.py` -> `export_onnx.py` -> `build_index.py` (writes
+`<run>/model`, the directory `MTGSTACK_MODEL` points at; default `~/.mtgstack/model`) -> `eval_lab.py` for real photos.
+The scanner uses the model when it is installed and `onnxruntime` is importable, otherwise OCR only. Tests never load
+an installed model (conftest points `MTGSTACK_MODEL` at nothing); they use `recognizer=None` or a fake.
+Not done yet: running the model on the phone (onnxruntime-web), publishing model + index, Lab UI for model vs OCR.

@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pillow", "pytest"]
+model = ["onnxruntime>=1.17"]   # picture recognition (optional; OCR-only without it)
 
 [project.scripts]
 mtgstack = "mtgstack.cli:main"

@@ -65,6 +65,31 @@ Matching the *whole picture* is robust to frames; it's how commercial scanner ap
 5. On-device: ≤ 300 ms per scan on iPhone (embed + search), model ≤ 10 MB, index ≤ 20 MB.
 6. Ship: Pages build serves model + index; Scanner Lab shows model vs OCR accuracy.
 
+## Status (2026-11-12)
+Done, on branch `scanner-model`:
+- **Data** (`scripts/fetch_images.py`, `mtgstack/scanner/modeldata.py`): 111,690 images / 110,225 paper printings /
+  53,978 illustrations in `~/mtg-data` (`manifest.jsonl`, `images/<k[:2]>/<key>.jpg`; back faces are `<id>.1`).
+  Art-series backs are skipped, and byte-identical "not available" pictures are detected (`placeholders.txt`).
+- **Training** (`scripts/train_embedder.py`, `scripts/embedlib.py`): MobileNetV3-Large -> 128-d. Each step pairs a
+  synthetic phone photo (GPU augmentation: glare, foil rainbow, sheen, shadow, corner jitter/zoom/180 turn with table
+  showing through, blur, low-res, white balance, exposure, noise, JPEG) with the clean image. Loss = in-batch
+  photo->reference retrieval (batches are same-set chunks = hard negatives) + 0.5 x CosFace over illustrations.
+  3% of illustrations are held out completely (`is_holdout`) to measure unseen art. Batch 160 pairs ~ 11 GB VRAM.
+- **Export** (`scripts/export_onnx.py`): ONNX opset 17 with float16-stored weights: 8.8 MB, identical output.
+  Static int8 quantization of MobileNetV3 wrecks accuracy (71% vs 99% on the pilot; SE/hard-swish ranges), so int8 is
+  opt-in (`--int8`). To get a real int8 model: quantization-aware training or a ReLU backbone.
+- **Index** (`scripts/build_index.py`): int8 vectors (no measurable loss), writes the deployable `<run>/model`
+  directory and `report.json` (accuracy of the shipped model + int8 index on synthetic photos).
+- **Runtime** (`mtgstack/scanner/recognizer.py`, `resolve.py`): picture match first; a confident match names the card
+  and only the collector line is read to pick the printing; otherwise OCR runs and the match backs it up or
+  questions it. `/api/scan` accepts client-computed `hints`. `ScanResult` gained `recognizer` + `model_version`.
+- **Lab** (`scanlab.py`): each scan stores recognizer/model version; `stats().by_recognizer`;
+  `POST /api/lab/rerun?ocr_only=true` to compare. `scripts/eval_lab.py` scores the model on labelled photos.
+
+Not done: milestone 2/3/4 numbers on **real photos** (`scan-data/` is empty: scan and label cards in the Lab first,
+then run `eval_lab.py` and tune `recognizer.CONFIDENT_SIM/MARGIN`), on-device inference (onnxruntime-web),
+publishing model + index with the Pages build, embedding new printings in the daily Action, Lab UI for model vs OCR.
+
 ## Environment notes
 - Dev happens in WSL (Ubuntu) on Windows; repo at `/mnt/c/Users/Rajit/Desktop/Projects/mtgstack`.
   For training speed keep image data on the Linux filesystem (`~/mtg-data`), not `/mnt/c`.

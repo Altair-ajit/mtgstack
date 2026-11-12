@@ -41,6 +41,9 @@ def test_lab_flow(tmp_path, monkeypatch):
     st = c.get("/api/lab/stats").json()
     assert st["reviewed"] == 2 and st["accuracy"]["card"] == 50.0
     assert st["confusions"][0] == {"guessed": "(no guess)", "actual": "Counterspell", "count": 1}
+    # every scan records what identified it, and accuracy is split by that
+    assert det["recognizer"] == "ocr" and det["model_version"] is None
+    assert st["by_recognizer"] == {"ocr": {"n": 2, "card": 50.0, "printing": 50.0, "finish": 50.0}}
 
     c.post("/api/lab/rerun")
     for _ in range(100):
@@ -50,6 +53,17 @@ def test_lab_flow(tmp_path, monkeypatch):
         time.sleep(0.2)
     assert rr["state"] == "done", rr
     assert rr["report"]["n"] == 2 and rr["report"]["now"]["card"] == 50.0 and not rr["report"]["broken"]
+    assert rr["report"]["recognizers"] == {"ocr": 2} and rr["report"]["model_version"] is None
+    assert c.post("/api/lab/rerun?ocr_only=true").status_code == 200
+
+    # picture matches computed by the client (the phone runs the model itself) decide the card
+    sol = conn.execute("SELECT id FROM printings WHERE set_code='cmm' AND collector_number='410'").fetchone()[0]
+    hinted = c.post("/api/scan?save=false", data={"hints": json.dumps([{"printing_id": sol, "score": 0.93, "group": 1}]),
+                                                  "model_version": "js-test"},
+                    files=[("files", ("a.jpg", jpg(photo(card_image(set_code="CMM", number="410"))), "image/jpeg"))]).json()
+    assert hinted["printing_id"] == sol and hinted["recognizer"].startswith("model") and hinted["model_version"] == "js-test"
+    assert c.post("/api/scan", data={"hints": "not json"},
+                  files=[("files", ("a.jpg", b"x", "image/jpeg"))]).status_code == 400
 
     z = c.get("/api/lab/export")
     assert z.headers["content-type"] == "application/zip" and len(z.content) > 1000
