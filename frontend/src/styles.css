@@ -115,7 +115,11 @@ table.cards.deck .cname, table.cards.deck .sub { white-space: nowrap; overflow: 
 
 /* card images */
 .card-img { display: block; border-radius: 4.5% / 3.3%; background: #dde2e8; object-fit: cover; }
-.card-img.sm { width: 46px; height: 64px; } .card-img.md { width: 100%; aspect-ratio: 63/88; height: auto; } .card-img.lg { width: 300px; aspect-ratio: 63/88; height: auto; border-radius: 14px; }
+.card-img.sm { width: 46px; height: 64px; } .card-img.md { width: 100%; height: auto; } .card-img.lg { width: 300px; height: auto; border-radius: 14px; flex: none; }
+/* Large previews show the whole image at its own shape (battles, planes, art cards, oversized promos aren't 63x88);
+   only the empty placeholder uses the card shape. */
+.card-img.md, .card-img.lg { object-fit: contain; background: transparent; align-self: flex-start; }
+.card-img.ph.md, .card-img.ph.lg { aspect-ratio: 63/88; }
 .card-img.ph { display: flex; align-items: center; justify-content: center; text-align: center; color: #6b7684; font-size: 9px; padding: 3px; overflow: hidden; background: linear-gradient(160deg, #e8ebef, #d5dbe2); }
 .card-img.ph.md span, .card-img.ph.lg span { font-size: 13px; font-weight: 600; padding: 10px; }
 .hovercard { position: relative; display: inline-block; }
