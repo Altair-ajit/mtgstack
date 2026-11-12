@@ -200,10 +200,15 @@ class Scryfall:
         return out
 
     def bulk_url(self, kind: str = "default_cards") -> str:
+        """URL of a bulk file. Scryfall now publishes gzipped JSON Lines (`jsonl_download_uri`, one card per line);
+        older responses had a single JSON array (`download_uri`). sync_bulk reads either."""
         meta = self._get("/bulk-data")  # explicit sync: surface network errors
         for item in meta["data"]:
             if item["type"] == kind:
-                return item["download_uri"]
+                url = item.get("jsonl_download_uri") or item.get("download_uri")
+                if url:
+                    return url
+                raise RuntimeError(f"bulk type {kind} has no download link: {sorted(item)}")
         raise RuntimeError(f"bulk type {kind} not found")
 
 
@@ -312,7 +317,7 @@ class Catalog:
                     yield chunk
 
             batch = []
-            for card in ijson.items(_IterStream(chunks()), "item", use_float=True):
+            for card in _bulk_cards(chunks()):
                 batch.append(card)
                 if len(batch) >= 5000:
                     n += upsert_cards(self.conn, batch, tracked=tracked)
@@ -334,6 +339,59 @@ class Catalog:
         cards = self.client.collection(identifiers)
         upsert_cards(self.conn, cards)
         return cards
+
+
+def _bulk_cards(chunks):
+    """Yield card dicts from a bulk download in any format Scryfall has used: a JSON array or JSON Lines, either
+    plain or gzip-compressed (sniffed from the bytes, so it doesn't depend on file names or headers)."""
+    import zlib
+    it = iter(chunks)
+    first = b""
+    for c in it:
+        first += c
+        if len(first) >= 4:
+            break
+
+    def rest():
+        if first:
+            yield first
+        yield from it
+    stream = rest()
+    if first[:2] == b"\x1f\x8b":
+        def gunzip(src):
+            d = zlib.decompressobj(zlib.MAX_WBITS | 32)
+            for c in src:
+                out = d.decompress(c)
+                if out:
+                    yield out
+            tail = d.flush()
+            if tail:
+                yield tail
+        stream = gunzip(stream)
+    # peek at the first non-whitespace byte: '[' = JSON array, '{' = JSON Lines
+    head = b""
+    for c in stream:
+        head += c
+        if head.lstrip():
+            break
+
+    def all_bytes():
+        if head:
+            yield head
+        yield from stream
+    if head.lstrip()[:1] == b"[":
+        import ijson
+        yield from ijson.items(_IterStream(all_bytes()), "item", use_float=True)
+        return
+    buf = b""
+    for c in all_bytes():
+        buf += c
+        *lines, buf = buf.split(b"\n")
+        for line in lines:
+            if line.strip():
+                yield json.loads(line)
+    if buf.strip():
+        yield json.loads(buf)
 
 
 class _IterStream:

@@ -238,7 +238,7 @@ def main(argv=None):
             _out(args, prices.quotes(conn, args.printing_id))
     elif args.cmd == "catalog":
         if args.cat_cmd == "sync":
-            n = catalog.sync_bulk(progress=lambda n: print(f"  {n} printings...", file=sys.stderr))
+            n = catalog.sync_bulk(progress=lambda d, t, n: print(f"  {n} printings...", file=sys.stderr))
             _out(args, {"printings": n})
         else:
             _out(args, catalog.prints_by_name(args.name), lambda ps: [print(
