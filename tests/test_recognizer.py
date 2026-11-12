@@ -178,6 +178,42 @@ def test_plausible_picture_is_the_suggestion_when_text_is_useless(mcat):
     assert r.printing_id == U("cmr/358") and r.recognizer == "ocr" and r.needs_review
 
 
+def test_art_box_hypotheses_recover_the_card():
+    import cv2
+    from mtgstack.scanner import detect
+    card = np.array([[300, 120], [760, 180], [700, 830], [230, 760]], np.float32)       # a tilted card in a photo
+    m = cv2.getPerspectiveTransform(np.array([[0, 0], [detect.W, 0], [detect.W, detect.H], [0, detect.H]], np.float32), card)
+    for x0, y0, x1, y1 in detect.ART_BOXES:
+        art = np.array([[[x0 * detect.W, y0 * detect.H], [x1 * detect.W, y0 * detect.H],
+                         [x1 * detect.W, y1 * detect.H], [x0 * detect.W, y1 * detect.H]]], np.float32)
+        box = cv2.perspectiveTransform(art, m)[0]
+        errs = [np.abs(detect._order(h) - detect._order(card)).max() for h in detect.art_box_hypotheses(box)]
+        assert min(errs) < 2.0                                                            # one of them is the card
+
+
+def test_model_picks_among_detector_outlines(mcat, monkeypatch):
+    from mtgstack.scanner import detect
+    img = detect.load(photo(card_image("Brass Orrery", "CMR", "358")))
+    good = detect.find_card(img)
+    c = good.mean(0)
+    bad = c + (good - c) * 0.5                                         # locked onto something inside the card
+    monkeypatch.setattr(detect, "proposals", lambda frame, limit=12: [bad, good])
+
+    class CropAware:                                                   # unsure about the first crop, sure about the second
+        def __init__(self):
+            self.calls = 0
+
+        def match(self, card_bgr):
+            self.calls += 1
+            sure = self.calls > 1
+            return Match(printings=[U("roe/101"), U("cmr/358")], score=0.93 if sure else 0.45,
+                         margin=0.5 if sure else 0.02, model_version="fake-1")
+    r = Scanner(mcat, fetch_images=False, recognizer=CropAware()).scan([img])
+    # the collector line was read from the good crop, so the exact printing is confirmed
+    assert (r.printing_id, r.recognizer) == (U("cmr/358"), "model+ocr") and r.confidence >= 0.95
+    assert any("outline" in e for e in r.evidence)
+
+
 def test_hints_from_the_caller_and_broken_models(mcat):
     img = photo(card_image("Brass Orrery", "CMR", "358"))
     hints = [{"printing_id": U("roe/101"), "score": 0.91, "group": 1}, {"printing_id": U("cmr/358"), "score": 0.9, "group": 1},

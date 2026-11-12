@@ -70,10 +70,17 @@ class Scanner:
         falls back to the OCR pipeline and is offered among the candidates.
         """
         frames = [detect.load(i) for i in images]
-        cards = [detect.warp(f) for f in frames]
         res = ScanResult()
         idx = NameIndex.get(self.catalog)
-        match = self._picture_match(cards[0], hints, hints_version)
+        if self.recognizer is not None and not hints:
+            # the detector proposes several outlines; the picture match tells which one really is the card
+            card, match, switched = self._best_crop(frames[0])
+            cards = [card] + [self._best_crop(f)[0] if switched else detect.warp(f) for f in frames[1:]]
+            if switched:
+                res.evidence.append("the first outline found matched poorly; used another outline of the card")
+        else:
+            cards = [detect.warp(f) for f in frames]
+            match = self._picture_match(cards[0], hints, hints_version)
         if match is not None:
             res.model_version = match.model_version or None
             if match.confident and self._decide_by_picture(match, cards, res, idx, debug):
@@ -131,6 +138,26 @@ class Scanner:
             import logging
             logging.getLogger("mtgstack.scanner").warning("picture recognition failed: %s: %s", type(e).__name__, e)
         return None
+
+    def _best_crop(self, frame: np.ndarray):
+        """Rectify the card, letting the picture match choose among the detector's outlines when its first
+        choice matches poorly (typically it locked onto the art box). -> (card, match or None, switched?)"""
+        props = detect.proposals(frame)
+        card = detect.warp(frame, props[0])
+        match = self._picture_match(card, None, "")
+        if match is None or match.confident:
+            return card, match, False
+        best = (card, match, False)
+        for q in props[1:]:
+            c = detect.warp(frame, q)
+            m = self._picture_match(c, None, "")
+            if m is None:
+                break
+            if (m.confident, m.score) > (best[1].confident, best[1].score) and (m.confident or m.score >= match.score + 0.05):
+                best = (c, m, True)
+                if m.confident and m.score >= 0.85:
+                    break
+        return best
 
     def _decide_by_picture(self, match, cards: list[np.ndarray], res: ScanResult, idx: "NameIndex", debug: bool) -> bool:
         """The picture is a confident match: take the card from it and use the collector line only to choose

@@ -27,7 +27,7 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 - `mtgstack/collection.py`: lots, tags, move/split/merge/update; `add()` triggers deck auto-allocation
 - `mtgstack/decks.py`: decklists, reconcile (have / to_move / to_buy), pull, send, auto_allocate
 - `mtgstack/query.py`: Scryfall-style query language over lots and deck entries
-- `mtgstack/scanner/`: detect.py (edges, any rotation), markers.py (OCR), foil.py, resolve.py (title/type/collector arbitration, NameIndex),
+- `mtgstack/scanner/`: detect.py (edges, any rotation; `proposals` = alternative outlines the model chooses among), markers.py (OCR), foil.py, resolve.py (title/type/collector arbitration, NameIndex),
   recognizer.py (optional ONNX picture match, tried before OCR), modeldata.py (manifest rows + index file format)
 - `mtgstack/scanlab.py`: scan dataset in `scan-data/` (MTGSTACK_SCANS): save, label, stats/confusions, re-run harness, export
 - `mtgstack/server.py`: REST API; serves web_dist with SPA fallback (`/classic` = the old single-file UI)

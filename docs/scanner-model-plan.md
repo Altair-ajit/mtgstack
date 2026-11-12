@@ -105,7 +105,7 @@ labels: each match was checked by eye against the matched reference image. 76 ph
 |---|---|---|
 | OCR-only scanner | 19 (25%) | old frames have no collector line and their title font defeats Tesseract |
 | Model alone (top-1 artwork) | 72 (95%) | 64 confident, **all 64 right** |
-| Scanner with model | 72 (95%) | was 66 before the "plausible match" fallback below |
+| Scanner with model | 74 (97%) | 66 at first; 72 with the "plausible match" fallback, 74 with outline proposals (below) |
 
 - The 4 misses are not model errors: the detector cropped the wrong thing (1), the card was half covered by another
   object (2), or the crop came out sideways (1). All scored <= 0.50 with margin <= 0.10.
@@ -119,9 +119,16 @@ labels: each match was checked by eye against the matched reference image. 76 ph
 - Only 4 of 76 were accepted without review: these old cards have no collector line, so the printing among
   same-art reprints (LEA/LEB/2ED/CED...) still has to be picked by hand. Telling those apart (border colour, corner
   radius, copyright line) is the next accuracy gain for old cards.
-- **The detector is now the weak link**: about 1 crop in 7 zoomed into the art box or came out rotated 90 degrees
-  (dark-bordered cards on dark cloth, slabs, overlapping cards). The model shrugged most of these off, but that is
-  where its confidence drops. Idea: try the detector's alternative quads / rotations and keep the best-scoring match.
+- The detector was the weak link: about 1 crop in 7 zoomed into the art box or came out rotated 90 degrees
+  (dark-bordered cards on dark cloth, slabs, overlapping cards), because the art box is a card-shaped rectangle.
+  **Fixed with outline proposals** (`detect.proposals`, `Scanner._best_crop`): the detector also offers other
+  well-scored outlines around the same spot plus "this quad is the art box, so the card is here" extrapolations
+  (both turns, both frame generations), and when the first crop does not match confidently the model picks the
+  best-matching one. Web photos: scanner right 72 -> 74 of 76, confident 64 -> 71, still no confident wrong match
+  and none on backs/non-cards; the 2 left are the cards half covered by another object. Synthetic detector check
+  (1000 photos): 964 -> 983 right, confident 953 -> 977, all right. Costs up to ~0.3 s, only on photos whose first
+  crop is not confident. Outlines elsewhere in the photo are deliberately not tried: with several cards in view
+  the model then jumps to a neighbour. The OCR-only path (no model installed) does not get this fix.
 
 Not done: Lab photos from this user's own phone (`scan-data/` is empty; `eval_lab.py` is ready for them), on-device inference (onnxruntime-web),
 publishing model + index with the Pages build, embedding new printings in the daily Action, Lab UI for model vs OCR.

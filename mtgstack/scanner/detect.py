@@ -248,6 +248,63 @@ def find_card(img: np.ndarray, return_score: bool = False):
     Many candidate quadrilaterals are generated from several edge maps; each is scored on card proportions
     and on whether all four sides lie on real edges; the winner is refined to sub-pixel edges.
     """
+    corners, score, _ = _find(img)
+    return (corners, score) if return_score else corners
+
+
+def _overlap(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
+    """(intersection / smaller area, intersection / union) of two convex quads."""
+    inter, _ = cv2.intersectConvexConvex(cv2.convexHull(a.astype(np.float32)), cv2.convexHull(b.astype(np.float32)))
+    aa, ab = cv2.contourArea(a.astype(np.float32)), cv2.contourArea(b.astype(np.float32))
+    return inter / max(min(aa, ab), 1e-6), inter / max(aa + ab - inter, 1e-6)
+
+
+# Where the picture sits on the card (x0, y0, x1, y1 as fractions): 2003+ frames, and the 1993-2003 frame.
+ART_BOXES = ((0.08, 0.11, 0.92, 0.55), (0.115, 0.115, 0.89, 0.545))
+
+
+def art_box_hypotheses(quad: np.ndarray) -> list[np.ndarray]:
+    """Card outlines for the case that `quad` is really the card's art box.
+
+    The art box is a landscape rectangle with nearly a card's proportions, so the detector can lock onto it
+    (turned 90 degrees) when the card's own edge is weak: black border on a dark table, a sleeve, a slab.
+    For both ways the picture could be turned and both frame generations, extrapolate where the whole card is.
+    """
+    quad = _order(quad)
+    full = np.array([[[0, 0], [W, 0], [W, H], [0, H]]], np.float32)
+    out = []
+    for x0, y0, x1, y1 in ART_BOXES:
+        src = np.array([[x0 * W, y0 * H], [x1 * W, y0 * H], [x1 * W, y1 * H], [x0 * W, y1 * H]], np.float32)
+        for roll in (1, 3):
+            m = cv2.getPerspectiveTransform(src, np.roll(quad, -roll, axis=0).astype(np.float32))
+            out.append(cv2.perspectiveTransform(full, m)[0])
+    return out
+
+
+def proposals(img: np.ndarray, limit: int = 12) -> list[np.ndarray | None]:
+    """Outlines worth trying, best guess first (None = no card found: use the whole photo).
+
+    After the detector's choice come other well-scored outlines around the same spot and the art-box
+    hypotheses of each. The detector cannot tell which is right from edges alone; a caller that can check
+    the result (the picture recogniser) tries them when the first one matches poorly.
+    """
+    corners, _, others = _find(img)
+    if corners is None:
+        return [None]
+    out = [corners] + others
+    for q in [corners] + others[:1]:
+        out += art_box_hypotheses(q)
+    h, w = img.shape[:2]
+    frame = np.array([[0, 0], [w, 0], [w, h], [0, h]], np.float32)
+    keep = [out[0]]
+    for q in out[1:]:
+        if cv2.isContourConvex(q.astype(np.float32)) and _overlap(q, frame)[0] > 0.6:   # mostly inside the photo
+            keep.append(q)
+    return keep[:limit]
+
+
+def _find(img: np.ndarray):
+    """-> (corners or None, score, other plausible outlines around the same spot)."""
     scale = min(1.0, 900 / max(img.shape[:2]))
     small = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA) if scale < 1 else img
     grad = _gradient(small)
@@ -266,7 +323,7 @@ def find_card(img: np.ndarray, return_score: bool = False):
         uni = band_uniformity(small, q)
         scored.append((shape * sup * (0.3 + 0.7 * uni), sup, q))
     if not scored or max(s for s, _, _ in scored) < 0.2:
-        return (None, 0.0) if return_score else None
+        return None, 0.0, []
     best_score, _, best = max(scored, key=lambda t: t[0])
     # The frame, art box and text box are card-shaped rectangles too, so the best-scoring quad may be one
     # of them. The card's outer edge encloses them all: keep stepping out to the nearest enclosing quad
@@ -290,10 +347,17 @@ def find_card(img: np.ndarray, return_score: bool = False):
     diag = float(np.linalg.norm(best[0] - best[2]))
     for r in (max(6, int(0.035 * diag)), 5):             # coarse snap (fixes bounding-box slop), then fine
         best = _order(refine(grad, best, radius=r, thresh=thresh))
+    others = []
+    for _, _, q in sorted(scored, key=lambda t: -t[0]):
+        if len(others) == 3:
+            break
+        # only around the same spot: an outline elsewhere in the photo is a different card (or object)
+        if _overlap(q, best)[0] >= 0.5 and all(_overlap(q, o)[1] < 0.75 for o in [best] + others):
+            others.append(q)
     corners = best / scale
     if scale < 1:  # final snap at full resolution for crisp OCR
         corners = _order(refine(_gradient(img), corners, radius=max(3, int(2 / scale))))
-    return (corners, round(float(best_score), 3)) if return_score else corners
+    return corners, round(float(best_score), 3), [o / scale for o in others]
 
 
 def track(img: np.ndarray) -> dict:
