@@ -86,6 +86,15 @@ Done, on branch `scanner-model`:
 - **Lab** (`scanlab.py`): each scan stores recognizer/model version; `stats().by_recognizer`;
   `POST /api/lab/rerun?ocr_only=true` to compare. `scripts/eval_lab.py` scores the model on labelled photos.
 
+**v1 results** (`scripts/train_all.sh v1 --epochs 30`: 30 epochs in ~100 min on the 4070 Ti, ~650 pairs/s; model in
+`~/mtg-data/runs/v1/model`, installed to `~/.mtgstack/model`; index = 111,678 images, 14.3 MB + 5.0 MB ids):
+- Synthetic photos against the full index, shipped ONNX + int8 index: top-1 artwork 99.95% seen, 100.0% held-out
+  (training-time eval: 99.92 / 99.88). Similarity ~0.94 when right, ~0.65 for the few wrong.
+- Through the app's detector (1000 fake table photos, `tests/synth.place` -> `detect.warp` -> recognizer): 964 right;
+  953 confident, all 953 right. The 36 misses score <= 0.59 (mostly cluttered backgrounds where the crop is off), so
+  they fall back to OCR. Right matches: median 0.98, 5th percentile 0.95, so the 0.65 / 0.10 thresholds have room.
+- Runtime on desktop CPU: load 0.3 s, lookup ~25 ms.
+
 Not done: milestone 2/3/4 numbers on **real photos** (`scan-data/` is empty: scan and label cards in the Lab first,
 then run `eval_lab.py` and tune `recognizer.CONFIDENT_SIM/MARGIN`), on-device inference (onnxruntime-web),
 publishing model + index with the Pages build, embedding new printings in the daily Action, Lab UI for model vs OCR.
