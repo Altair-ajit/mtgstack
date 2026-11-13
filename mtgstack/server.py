@@ -113,6 +113,7 @@ class Send(BaseModel):
 def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
     conn = db.connect(db_path)
     lock = threading.Lock()   # sqlite connection shared across request threads
+    decks.cover_all(conn)     # cards put in a deck by older versions show on its page (see decks.cover_all)
     catalog = Catalog(conn, online=online)
     app = FastAPI(title="mtgstack", version="0.1.0",
                   description="Tag-based MTG collection. Query syntax: GET /api/help/query")

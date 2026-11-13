@@ -101,6 +101,19 @@ def test_a_card_moved_into_a_deck_shows_on_its_list(conn, cat):
     assert {e["wanted"] for e in decks.reconcile(conn, slug)["entries"]} == {2, 1}
 
 
+def test_startup_shows_cards_that_were_moved_into_decks_before(conn, cat, tmp_path):
+    """Older versions tagged a moved card into a deck without listing it: on the next start it is on the deck."""
+    slug = decks.create_deck(conn, "Old Deck", "commander")
+    conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, qty) VALUES (?,?,?,?)", (slug, "main", "Island", 10))
+    lot = col.add(conn, pid(cat, "Sol Ring", "cmm"), 2, "foil", "NM", "en", auto_allocate=False)
+    col.move(conn, lot, None, add_tags=["deck:old-deck"])            # what a move used to do: the tag, nothing else
+    assert "Sol Ring" not in {e["name"] for e in decks.reconcile(conn, slug)["entries"]}
+    assert decks.cover_all(conn) == 1
+    got = {e["name"]: (e["wanted"], e["in_deck"]) for e in decks.reconcile(conn, slug)["entries"]}
+    assert got["Sol Ring"] == (2, 2) and got["Island"][0] == 10
+    assert decks.cover_all(conn) == 0                                 # nothing more to do the second time
+
+
 def test_renaming_a_deck_moves_its_tags_and_list(conn, cat):
     slug = decks.create_deck(conn, "Test Deck", "commander", status="building")
     for board in ("main", "side"):

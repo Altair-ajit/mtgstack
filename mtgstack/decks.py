@@ -168,6 +168,17 @@ def _cover(conn, slug: str, fresh: bool = False) -> None:
                 conn.execute("UPDATE deck_entries SET qty = qty + ? WHERE id=?", (r["q"] - have[0], have[1]))
 
 
+def cover_all(conn) -> int:
+    """Start-up repair: every deck's list covers the cards tagged into it. Cards moved into a deck before moving
+    did that (or tagged by hand) were in the deck but not on its page; this shows them. Only ever adds, so running
+    it again changes nothing. Returns how many list entries it added or raised."""
+    changes = conn.total_changes
+    for (slug,) in conn.execute("SELECT slug FROM decks").fetchall():
+        _cover(conn, slug)
+    conn.commit()
+    return conn.total_changes - changes
+
+
 def deck_from_tags(conn, slug: str, name: str | None = None, keep: bool = False) -> str:
     """Build the decklist from whatever is currently tagged into the deck (e.g. after scanning a deck).
 
