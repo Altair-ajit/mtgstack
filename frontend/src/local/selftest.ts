@@ -43,7 +43,7 @@ export async function run(events: string[]) {
   let opfs = "no";
   try { await navigator.storage.getDirectory(); opfs = "yes"; } catch (e) { opfs = `no (${(e as Error).name})`; }
   log(`service worker ${"serviceWorker" in navigator ? "yes" : "no"}, cache storage ${"caches" in window ? "yes" : "no"}, OPFS ${opfs}, ` +
-      `indexedDB ${"indexedDB" in window ? "yes" : "no"}, camera API ${navigator.mediaDevices?.getUserMedia ? "yes" : "no"}`);
+      `indexedDB ${"indexedDB" in window ? "yes" : "no"}, camera API ${"mediaDevices" in navigator ? "yes" : "no"}`);
   const header = document.querySelector("header.top");
   if (header) log(`header ${Math.round(header.getBoundingClientRect().height)} px tall, page ${document.documentElement.scrollWidth} px wide`);
 
