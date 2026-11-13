@@ -155,7 +155,9 @@ export const api = {
   },
   detect: (frame: Blob) => {
     const fd = new FormData(); fd.append("file", frame, "f.jpg");
-    return fetch("/api/detect", { method: "POST", body: fd }).then(r => r.json());
+    return fetch("/api/detect", { method: "POST", body: fd }).then(async r => {
+      const d = await r.json(); if (!r.ok) throw new Error(d.detail || r.statusText); return d;
+    });
   },
 };
 

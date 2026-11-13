@@ -72,10 +72,15 @@ export default function Scan() {
     } catch (e) { toast(String((e as Error).message), "err"); }
   };
 
+  // One canvas per size, reused: the tracker grabs a frame several times a second, and phones (iOS above all) cap
+  // the memory of all live canvases. Past the cap new ones silently draw blank, i.e. "no card" for ever.
+  const canvases = useRef<Record<string, HTMLCanvasElement>>({});
   const grab = (maxSide = 0): Promise<Blob> => new Promise(ok => {
-    const v = video.current!, c = document.createElement("canvas");
+    const v = video.current!, key = maxSide ? "small" : "full";
+    const c = canvases.current[key] || (canvases.current[key] = document.createElement("canvas"));
     const k = maxSide ? Math.min(1, maxSide / Math.max(v.videoWidth, v.videoHeight)) : 1;
-    c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+    const w = Math.round(v.videoWidth * k), h = Math.round(v.videoHeight * k);
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
     c.getContext("2d")!.drawImage(v, 0, 0, c.width, c.height);
     c.toBlob(b => ok(b!), "image/jpeg", maxSide ? 0.8 : 0.92);
   });
@@ -138,6 +143,8 @@ export default function Scan() {
         const t = thumb(s.last);
         if (t && t.reduce((n, x, i) => n + Math.abs(x - s.thumb![i]), 0) / 256 > 18) s.armed = true;
       }
+      // whatever re-armed it (often a hand on the card) is still in the picture: wait for a fresh steady view
+      if (s.armed) s.history = [];
     }
     if (!auto || !s.armed || !r.corners || steady() < 2) return;
     s.armed = false; s.last = r.corners; s.thumb = thumb(r.corners);
@@ -153,14 +160,19 @@ export default function Scan() {
     let alive = true;
     const loop = async () => {
       while (alive) {
-        const v = video.current;
-        if (trackOn && v?.videoWidth && !st.current.busy) {
+        const v = video.current, cam = stream.getVideoTracks()[0];
+        // A camera the phone took away (call, app switch, another tab) leaves a frozen picture: say so, don't
+        // keep "looking" at it.
+        if (!cam || cam.readyState === "ended") { setHint("The camera stopped"); setStream(null); return; }
+        if (v && v.paused) v.play().catch(() => {});
+        if (cam.muted) setHint("The camera is paused by the device. Bring this page to the front.");
+        else if (trackOn && v?.videoWidth && !st.current.busy) {
           st.current.busy = true;
           try {
             const r: Track = await api.detect(await grab(640));
             handlers.current.draw(r);
             await handlers.current.maybeAuto(r);
-          } catch { /* keep going */ }
+          } catch (e) { setHint(`The scanner isn't responding: ${(e as Error).message}`); }
           st.current.busy = false;
         }
         await new Promise(r => setTimeout(r, 30));
