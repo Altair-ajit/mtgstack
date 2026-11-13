@@ -249,6 +249,8 @@ table.cards.deck td.qtycol { width: 30px; font-weight: 700; } table.cards.deck t
 .tag-toggle { border-radius: 99px; padding: 4px 11px; font-size: 13px; background: #fff; }
 .tag-toggle.on { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
 .tag-toggle.deck:not(.on) { color: var(--blue-d); border-color: #bcd3fb; }
+.deck-pick { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 600; margin-right: 6px; }
+.deck-pick.on select { border-color: var(--blue); background: var(--blue-l); color: var(--blue-d); font-weight: 600; }
 .tagbar select, .tag-new { padding: 4px 8px; font-size: 13px; } .tag-new { width: 170px; }
 .batch { container-type: inline-size; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
 .batch-head { position: sticky; top: 60px; z-index: 5; display: flex; gap: 8px 16px; align-items: center; justify-content: space-between; flex-wrap: wrap;

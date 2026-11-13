@@ -54,7 +54,7 @@ export default function Scan() {
   const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
   const toast = useToast();
   const qc = useQueryClient();
-  const st = useRef({ history: [] as ([number, number][] | null)[], armed: true, busy: false, last: null as [number, number][] | null,
+  const st = useRef({ history: [] as ([number, number][] | null)[], armed: true, busy: false, away: 0,
     thumb: null as Float32Array | null });
   const thumbCanvas = useRef<HTMLCanvasElement | null>(null);
 
@@ -134,21 +134,20 @@ export default function Scan() {
     const s = st.current;
     s.history.push(r.found && r.hint === "ready" ? r.corners! : null);
     if (s.history.length > 8) s.history.shift();
-    // Scan each card once: after a capture, wait until the card left, moved, or its spot looks different
-    // (the next card of a pile lands in the same place; a hand passing over it counts too, for identical copies).
+    // Scan each card once. After a capture the next one waits until the card is gone: no card in view, or the
+    // card in view looks different from the one captured (another card, or a hand over it, which is how an
+    // identical copy gets counted). The comparison follows the card, so a hand-held phone drifting, or the card
+    // sliding, is not a new card; and it must hold for two frames, so one blurred frame is not either.
     if (!s.armed) {
-      if (!r.found) s.armed = true;
-      else if (s.last && r.corners && Math.max(...r.corners.map((p, k) => Math.hypot(p[0] - s.last![k][0], p[1] - s.last![k][1]))) > 0.12) s.armed = true;
-      else if (s.last && s.thumb) {
-        const t = thumb(s.last);
-        if (t && t.reduce((n, x, i) => n + Math.abs(x - s.thumb![i]), 0) / 256 > 18) s.armed = true;
-      }
-      // whatever re-armed it (often a hand on the card) is still in the picture: wait for a fresh steady view
-      if (s.armed) s.history = [];
+      const t = r.found && r.corners && s.thumb ? thumb(r.corners) : null;
+      const differs = !!t && t.reduce((n, x, i) => n + Math.abs(x - s.thumb![i]), 0) / 256 > 26;
+      s.away = !r.found || differs ? s.away + 1 : 0;
+      // whatever re-armed it (often a hand on the card) may still be in the picture: wait for a fresh steady view
+      if (s.away >= 2) { s.armed = true; s.away = 0; s.history = []; }
     }
     // two ready (sharp, uncut) frames in a row that agree on where the card is: it has stopped moving
     if (!auto || !s.armed || !r.corners || steady() < 1) return;
-    s.armed = false; s.last = r.corners; s.thumb = thumb(r.corners);
+    s.armed = false; s.away = 0; s.thumb = thumb(r.corners);
     await send([await grab()], r.corners);
     s.history = [];
   };
