@@ -80,7 +80,7 @@ self.mtgOcr = (png, psm) => {
 // ---- card recognition model (onnxruntime-web) -----------------------------------------------------------------
 // Optional: data/model/ holds a small ONNX model + an index of every printing's picture (docs/scanner-model-plan.md).
 // Python rectifies the card and awaits mtgMatch(); without the files the scanner simply reads the text as before.
-const ORT = `${PY}ort-1.31.1/`;           // keep in sync with scripts/build_pages.py
+const ORT = `${PY}ort-1.31.1-512m/`;      // keep in sync with scripts/build_pages.py (version + memory cap)
 const MODEL_CACHE = "mtgstack-model";
 let model = null, modelLoading = null;
 self.mtgModelReady = false;

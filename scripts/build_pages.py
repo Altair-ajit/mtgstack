@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PYODIDE_VERSION = "0.29.5"
 PACKAGES = ["fastapi", "sqlite3", "httpx", "pydantic", "opencv-python", "numpy"]
 ORT_FILES = ["ort.wasm.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]
+ORT_MAX_PAGES = 8192     # 64 KiB pages: the model's memory may grow to 512 MB (it uses far less); see main()
 MODEL_FILES = ["embedder.onnx", "embeddings.bin", "embeddings-ids.json"]
 CORE = ["pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json"]
 
@@ -134,12 +135,20 @@ def main() -> None:
 
     ort_src = nm / "onnxruntime-web"
     ort_ver = json.loads((ort_src / "package.json").read_text())["version"]
-    ort = py / f"ort-{ort_ver}"                                 # versioned: the service worker caches py/ forever
+    # versioned (the service worker caches py/ forever), and the name carries the memory cap patched in below
+    ort = py / f"ort-{ort_ver}-{ORT_MAX_PAGES // 16}m"
     ort.mkdir(parents=True, exist_ok=True)
     for f in ORT_FILES:
         shutil.copy(ort_src / "dist" / f, ort / f)
-    if f"ort-{ort_ver}/" not in (out / "py" / "worker.js").read_text():
-        sys.exit(f"worker.js expects a different onnxruntime-web than the installed {ort_ver}: update its ORT path")
+    # onnxruntime-web only ships a threaded build, whose shared memory declares a 4 GB maximum. iPhones reserve a
+    # shared memory's maximum up front and refuse ("Out of memory"); a smaller maximum is a valid import.
+    glue = ort / "ort-wasm-simd-threaded.mjs"
+    src, want = glue.read_text(encoding="utf-8"), "new WebAssembly.Memory({initial:256,maximum:65536,shared:!0})"
+    if src.count(want) != 1:
+        sys.exit(f"onnxruntime-web {ort_ver}: memory setup not found in {glue.name}; update the patch in build_pages.py")
+    glue.write_text(src.replace(want, want.replace("65536", str(ORT_MAX_PAGES))), encoding="utf-8", newline="\n")
+    if f"{ort.name}/" not in (out / "py" / "worker.js").read_text():
+        sys.exit(f"worker.js expects a different onnxruntime-web build than {ort.name}: update its ORT path")
 
     if a.model:
         publish_model(Path(a.model).expanduser(), out / "data" / "model")
