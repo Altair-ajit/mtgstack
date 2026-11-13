@@ -16,6 +16,9 @@ export interface BatchItem {
 export const itemPrice = (i: BatchItem) => i.prices[i.finish] ?? null;
 export const sameStack = (a: BatchItem, b: BatchItem) => a.printing_id === b.printing_id && a.finish === b.finish
   && a.condition === b.condition && a.language === b.language && [...a.tags].sort().join(" ") === [...b.tags].sort().join(" ");
+/** The same card going to the same place, whatever the printing and finish. */
+export const sameCard = (a: BatchItem, b: BatchItem) => a.name === b.name && a.condition === b.condition
+  && [...a.tags].sort().join(" ") === [...b.tags].sort().join(" ");
 
 const printingFields = (p: Printing, finish: Finish) => ({
   printing_id: p.printing_id, set_code: p.set_code, set_name: p.set_name, number: p.collector_number, image: p.image_small,

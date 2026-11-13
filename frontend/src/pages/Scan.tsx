@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, lab } from "../api";
 import CardPicker from "../components/CardPicker";
-import { BatchRow, itemFor, itemPrice, sameStack } from "../components/ScanBatch";
+import { BatchRow, itemFor, itemPrice, sameCard, sameStack } from "../components/ScanBatch";
 import type { BatchItem } from "../components/ScanBatch";
 import TagBar from "../components/TagBar";
 import type { Allocation, Finish, ImportRow } from "../api";
@@ -187,9 +187,17 @@ export default function Scan() {
   const stage = (it: BatchItem) => {
     setAdded(null);
     setItems(list => {
-      const same = list.find(x => sameStack(x, it));
-      setFresh(same ? same.id : it.id);
-      return same ? [{ ...same, qty: same.qty + it.qty }, ...list.filter(x => x !== same)] : [it, ...list];
+      // Copies of one card rarely scan identically: when the collector line is unreadable the printing or the
+      // finish is a guess that changes from copy to copy. So a scan also joins a row of the same card when
+      // either of the two was unsure, and the row keeps the surer details (a corrected row counts as sure).
+      const same = list.find(x => sameStack(x, it)) || list.find(x => sameCard(x, it) && (x.review || it.review));
+      if (!same) { setFresh(it.id); return [it, ...list]; }
+      const base = same.review && !it.review ? { ...it, id: same.id, scan_id: same.scan_id, orig: same.orig } : same;
+      const merged = { ...base, qty: same.qty + it.qty };
+      const rest = list.filter(x => x !== same);
+      const dup = rest.find(x => sameStack(x, merged));           // the surer details may match another row
+      setFresh(merged.id);
+      return dup ? [{ ...merged, qty: merged.qty + dup.qty }, ...rest.filter(x => x !== dup)] : [merged, ...rest];
     });
   };
   const fromScan = (r: ScanResult): BatchItem => {
