@@ -13,6 +13,11 @@ on:
       - "scripts/build_pages.py"
       - ".github/workflows/app.yml"
   workflow_dispatch:
+    inputs:
+      testflight:
+        description: "Upload the iOS app to TestFlight (needs the Apple secrets, see docs/app.md)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -114,3 +119,65 @@ jobs:
           xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
             -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
             CODE_SIGNING_ALLOWED=NO build | tail -40
+
+  # Manual only: Actions tab -> this workflow -> Run workflow -> tick "Upload the iOS app to TestFlight".
+  # Signing is done by Xcode with an App Store Connect API key, so no certificates are stored here. docs/app.md
+  # lists the three secrets and one variable this needs. NOT YET RUN: it could not be tried without an account.
+  testflight:
+    name: iOS (TestFlight upload)
+    needs: web
+    if: github.event_name == 'workflow_dispatch' && inputs.testflight
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-www
+          path: frontend/native-www
+      - name: Check the Apple settings are there
+        run: |
+          test -n "$TEAM_ID" || { echo "::error::Set the repository variable APPLE_TEAM_ID (docs/app.md)"; exit 1; }
+          test -n "$KEY_ID" -a -n "$ISSUER_ID" || { echo "::error::Set the APPSTORE_* secrets (docs/app.md)"; exit 1; }
+      - name: Write the API key
+        env:
+          PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/keys"
+          printf '%s' "$PRIVATE_KEY" > "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8"
+      - name: Archive
+        working-directory: frontend
+        run: |
+          npm ci
+          npx cap sync ios
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Release \
+            -destination "generic/platform=iOS" -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            archive | tail -40
+      - name: Upload to App Store Connect
+        run: |
+          cat > "$RUNNER_TEMP/export.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+          </dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/App.xcarchive" -exportOptionsPlist "$RUNNER_TEMP/export.plist" \
+            -exportPath "$RUNNER_TEMP/export" -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" | tail -40
