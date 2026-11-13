@@ -160,6 +160,13 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/keys"
           printf '%s' "$PRIVATE_KEY" > "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8"
+      - name: Check that Apple accepts the API key
+        env:
+          KEY_FILE: ${{ runner.temp }}/keys/AuthKey_${{ secrets.APPSTORE_KEY_ID }}.p8
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" -q install pyjwt cryptography
+          "$RUNNER_TEMP/venv/bin/python" scripts/check_appstore_key.py
       - name: Archive
         working-directory: frontend
         run: |
