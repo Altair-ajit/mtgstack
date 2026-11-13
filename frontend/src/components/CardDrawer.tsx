@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api";
@@ -9,10 +9,47 @@ export function allocationText(a: Allocation[]) {
   return a.map(x => `${x.qty}× ${x.name} → ${x.deck_name}${x.deck_progress ? ` (${x.deck_progress})` : ""}`).join(", ");
 }
 
-export default function CardDrawer({ printingId, onClose }: { printingId: string; onClose: () => void }) {
+/** `ids` + `onNavigate`: the cards of the list this was opened from, in its order. The view then steps through them:
+ * arrow buttons and keys, and a sideways swipe on phones. */
+export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
+  printingId: string; onClose: () => void; ids?: string[]; onNavigate?: (id: string) => void;
+}) {
   const qc = useQueryClient();
   const toast = useToast();
-  const { data, isLoading, error } = useQuery({ queryKey: ["card", printingId], queryFn: () => api.card(printingId) });
+  const { data, isLoading, error } = useQuery({ queryKey: ["card", printingId], queryFn: () => api.card(printingId), placeholderData: p => p });
+  const at = ids ? ids.indexOf(printingId) : -1;
+  const step = (d: number) => { if (ids && onNavigate && at >= 0 && ids[at + d]) onNavigate(ids[at + d]); };
+  const stepRef = useRef(step);
+  stepRef.current = step;
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).closest?.("input, select, textarea")) return;
+      if (e.key === "ArrowRight") stepRef.current(1); else if (e.key === "ArrowLeft") stepRef.current(-1);
+    };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, []);
+  const touch = useRef<{ x: number; y: number } | null>(null);
+  const swipe = {
+    onTouchStart: (e: React.TouchEvent) => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; },
+    onTouchEnd: (e: React.TouchEvent) => {
+      const s = touch.current; touch.current = null;
+      if (!s || (e.target as HTMLElement).closest?.("input, select, textarea, .scroll-x")) return;
+      const dx = e.changedTouches[0].clientX - s.x, dy = e.changedTouches[0].clientY - s.y;
+      if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
+    },
+  };
+  // always on screen while the card scrolls under it: where you are in the list, and the way out
+  const navBar = (
+    <div className="cd-nav">
+      {at >= 0 && ids && ids.length > 1 && <>
+        <button disabled={at === 0} onClick={() => step(-1)} aria-label="Previous card">‹</button>
+        <span className="muted small">{at + 1} of {ids.length}</span>
+        <button disabled={at === ids.length - 1} onClick={() => step(1)} aria-label="Next card">›</button>
+      </>}
+      <button className="cd-close" onClick={onClose} aria-label="Close">×</button>
+    </div>
+  );
   const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
   const [adding, setAdding] = useState<string | null>(null);
   const [form, setForm] = useState({ qty: 1, finish: "nonfoil" as Finish, condition: "NM" });
@@ -22,14 +59,15 @@ export default function CardDrawer({ printingId, onClose }: { printingId: string
     try { await p; toast(ok); refresh(); } catch (e) { toast(String((e as Error).message), "err"); }
   };
 
-  if (isLoading || !data) return <Drawer onClose={onClose}><p className="muted pad">{error ? String(error) : "Loading…"}</p></Drawer>;
+  if (isLoading || !data) return <Drawer onClose={onClose}>{navBar}<p className="muted pad">{error ? String(error) : "Loading…"}</p></Drawer>;
   const c = data.card;
   const priceRows = ["nonfoil", "foil", "etched"].filter(f => data.prices.some(p => p.finish === f));
   const quote = (f: string, src: string, kind: string) => data.prices.find(p => p.finish === f && p.source === src && p.kind === kind)?.price;
 
   return (
     <Drawer onClose={onClose}>
-      <div className="cd">
+      {navBar}
+      <div className={`cd ${c.id !== printingId ? "fetching" : ""}`} {...swipe}>
         <div className="cd-top">
           <CardImg src={c.image_normal} name={c.name} size="lg" />
           <div className="cd-info">
@@ -65,7 +103,7 @@ export default function CardDrawer({ printingId, onClose }: { printingId: string
                       {Object.keys(COND_LABEL).map(k => <option key={k}>{k}</option>)}</select></td>
                     <td><input className="qty" type="number" min={0} defaultValue={o.qty} key={`${o.lot_id}-${o.qty}`}
                       onBlur={e => { const v = +e.target.value; if (v !== o.qty) run(api.patchLot(o.lot_id, { qty: v }), v ? "Quantity updated" : "Removed"); }} /></td>
-                    <td className="num">{money(o.price)}</td>
+                    <td className="num" data-l="Market">{money(o.price)}</td>
                     <td>{tags.length ? tags.map(t => <TagChip key={t} t={t} />) : <span className="muted">collection</span>}</td>
                     <td className="right">
                       <select value="" onChange={e => {
@@ -110,9 +148,9 @@ export default function CardDrawer({ printingId, onClose }: { printingId: string
               <tr key={p.printing_id} className={p.printing_id === c.id ? "current" : ""}>
                 <td><CardImg src={p.image_small} name={p.set_code} /></td>
                 <td><span className="setcode">{p.set_code.toUpperCase()}</span> {p.set_name}<div className="muted small">#{p.collector_number} · {p.released_at?.slice(0, 4)}{p.lang !== "en" ? ` · ${p.lang}` : ""}{p.border_color === "borderless" ? " · borderless" : ""}{p.frame_effects.includes("showcase") ? " · showcase" : ""}{p.frame_effects.includes("extendedart") ? " · extended" : ""}</div></td>
-                <td className="num">{p.finishes.includes("nonfoil") ? money(p.price) : ""}</td>
-                <td className="num">{p.finishes.includes("foil") ? money(p.price_foil) : ""}</td>
-                <td className="num">{p.owned || ""}</td>
+                <td className="num" data-l="Normal">{p.finishes.includes("nonfoil") ? money(p.price) : ""}</td>
+                <td className="num" data-l="Foil">{p.finishes.includes("foil") ? money(p.price_foil) : ""}</td>
+                <td className="num" data-l="Owned">{p.owned || ""}</td>
                 <td className="right">
                   {adding === p.printing_id ? (
                     <span className="inline-add">

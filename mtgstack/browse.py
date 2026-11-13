@@ -112,7 +112,9 @@ def cards(conn: sqlite3.Connection, q: str = "", filters: dict | None = None, so
                MIN({TYPE_ORDER}) type_rank
         FROM lot_view v{where}
         GROUP BY v.printing_id, v.finish, v.condition, v.language"""
-    total_rows = conn.execute(f"SELECT COUNT(*) FROM ({grouped})", params).fetchone()[0]
+    # counted without the display columns: the full grouped select costs about as much as fetching the page
+    total_rows = conn.execute(f"SELECT COUNT(*) FROM (SELECT 1 FROM lot_view v{where} "
+                              "GROUP BY v.printing_id, v.finish, v.condition, v.language)", params).fetchone()[0]
     page = max(1, int(page))
     size = max(1, min(int(size), 500))
     page_rows = rows(conn.execute(f"SELECT * FROM ({grouped}) ORDER BY {order} LIMIT ? OFFSET ?",

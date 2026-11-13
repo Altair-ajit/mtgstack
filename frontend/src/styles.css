@@ -420,7 +420,7 @@ button.big, .btn.big { font-size: 16px; padding: 10px 18px; }
   .not-phone { display: none !important; }
   .only-phone { display: inline-flex; }
   div.only-phone { display: flex; } div.sheet-bg.only-phone { display: block; }
-  input, select, textarea { font-size: 16px; }                 /* smaller text makes iOS zoom the page on focus */
+  input, select, textarea { font-size: 16px !important; }      /* smaller text makes iOS zoom the page on focus */
   body { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
 
   /* shell */
@@ -509,4 +509,40 @@ button.big, .btn.big { font-size: 16px; padding: 10px 18px; }
   .toolbar .seg button { padding: 8px 9px; font-size: 13px; } .sortsel { font-size: 0; } .sortsel select { font-size: 16px; }
   .batch-deck { border-radius: 12px 12px 0 0; } .batch-deck + .batch-head { border-radius: 0; }
   .stepper button { padding: 7px 11px; } .br-opts select { padding: 7px 4px; }
+}
+
+/* an app does not zoom: no pinch, no double-tap (see also the viewport tag and main.tsx) */
+html { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+/* card view: stepping through the list it was opened from */
+.cd-nav { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; justify-content: center; gap: 14px; padding: 8px 48px 8px 12px;
+  background: var(--panel); border-bottom: 1px solid var(--line2); }
+.cd-nav button { font-size: 22px; line-height: 1; padding: 4px 14px; border-radius: 99px; }
+@media (max-width: 760px) {
+  /* a sheet over the list: the whole card fits the width, tables become rows */
+  .drawer-bg { z-index: 70; }
+  .drawer { top: auto; bottom: 0; left: 0; right: 0; width: 100vw; height: 94dvh; padding-top: 0; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 40px rgba(0,0,0,.3); overscroll-behavior: contain; }
+  .cd { padding: 12px 14px calc(28px + env(safe-area-inset-bottom)); }
+  .cd-top { gap: 12px; align-items: center; } .cd-top .card-img.lg { width: min(62vw, 260px); align-self: center; }
+  .cd-info { width: 100%; } .cd-info h2 { font-size: 19px; margin: 4px 0; } .cd h3 { margin: 18px 0 6px; }
+  .cd table.mini { font-size: 13.5px; } .cd table.mini.prices th, .cd table.mini.prices td { padding: 6px 4px; }
+  .cd table.mini:not(.prices), .cd table.mini:not(.prices) tbody { display: block; } .cd table.mini:not(.prices) thead { display: none; }
+  .cd table.mini:not(.prices) tr { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 9px 0; border-bottom: 1px solid var(--line2); }
+  .cd table.mini:not(.prices) td { padding: 0; border: 0; } .cd table.mini:not(.prices) td:empty { display: none; }
+  .cd table.mini td[data-l]:not(:empty)::before { content: attr(data-l) " "; color: var(--muted); font-size: 11.5px; font-weight: 400; }
+  .cd table.mini.printings td:nth-child(2) { flex: 1 1 60%; min-width: 0; } .cd table.mini.printings td:last-child { margin-left: auto; }
+  .cd table.mini.printings tr.current { margin: 0 -8px; padding: 9px 8px; border-radius: 8px; }
+  .cd table.mini select { padding: 6px 4px; max-width: 46vw; } .cd input.qty { width: 62px; }
+  .inline-add { flex-wrap: wrap; justify-content: flex-end; }
+  /* new deck / import */
+  textarea.paste { min-height: 0; } .deck-form { margin: 0 0 6px; } .deck-form input, .deck-form select { padding: 10px; }
+}
+
+/* batch thumbnails keep the card's own shape (they were given a fixed height and cropped to fit a narrower box) */
+.batch-row .card-img, .batch-row .card-img.sm { height: auto; aspect-ratio: 63 / 88; object-fit: contain; background: transparent; align-self: center; }
+.cd-nav { min-height: 30px; padding: 8px 12px; } .cd-nav .cd-close { position: absolute; right: 8px; top: 6px; border: 0; background: none; font-size: 26px; color: var(--muted); padding: 2px 12px; }
+.drawer:has(.cd-nav) .drawer-x { display: none; }
+@media (max-width: 760px) {
+  .batch-row { grid-template-columns: 54px minmax(0, 1fr) auto auto; } .batch-row .card-img, .batch-row .card-img.sm { width: 54px; }
+  .br-opts select:first-child { min-width: 92px; } .br-opts select { padding: 7px 2px 7px 6px; }
 }

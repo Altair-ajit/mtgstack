@@ -55,9 +55,17 @@ export default function Collection() {
 
   const { data, isFetching, error } = useQuery({
     queryKey: ["cards", q, filters, sort, page, size],
-    queryFn: () => api.cards(q, filters, sort, page, size),
+    queryFn: () => api.cards(q, filters, sort, page, size, false),
     placeholderData: keepPreviousData,
   });
+  // The counts beside each filter cost several times the page of cards: fetch them apart, and on phones only while
+  // the filter sheet is open, so sorting and filtering answer as fast as the list can.
+  const wide = useMemo(() => window.matchMedia("(min-width: 761px)").matches, []);
+  const facets = useQuery({
+    queryKey: ["facets", q, filters], queryFn: () => api.facets(q, filters),
+    enabled: wide || showFilters, placeholderData: keepPreviousData,
+  });
+  const ids = useMemo(() => [...new Set((data?.rows || []).map(r => r.printing_id))], [data]);
   const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
 
   const rowKey = (r: CardRow) => `${r.printing_id}|${r.finish}|${r.condition}|${r.language}`;
@@ -76,7 +84,7 @@ export default function Collection() {
     <div className="page with-sidebar">
       {showFilters && <div className="sheet-bg only-phone" onClick={() => setShowFilters(false)} />}
       <aside className={`sidebar ${showFilters ? "show" : ""}`}>
-        <FilterPanel facets={data?.facets} filters={filters} onChange={setFilters} />
+        <FilterPanel facets={facets.data} filters={filters} onChange={setFilters} />
         <div className="sheet-foot only-phone"><button className="primary" onClick={() => setShowFilters(false)}>
           Show {data ? data.totals.cards.toLocaleString() : ""} cards</button></div>
       </aside>
@@ -190,7 +198,7 @@ export default function Collection() {
           </div>
         )}
       </main>
-      {open && <CardDrawer printingId={open} onClose={() => setOpen(null)} />}
+      {open && <CardDrawer printingId={open} ids={ids} onNavigate={setOpen} onClose={() => setOpen(null)} />}
     </div>
   );
 }

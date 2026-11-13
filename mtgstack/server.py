@@ -433,6 +433,17 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
              "deck": deck or None, "min_price": min_price, "max_price": max_price}
         return guard(browse.cards, conn, q, f, sort, page, size, facets)
 
+    @app.get("/api/facets")
+    def api_facets(q: str = "", set: str = "", rarity: str = "", color: str = "", type: str = "", finish: str = "",
+                   condition: str = "", language: str = "", tag: str = "", deck: str = "", min_price: str = "",
+                   max_price: str = ""):
+        """The counts next to each filter value, for the same search and filters as /api/cards. They cost several
+        times the page itself, so the UI asks for them apart (`/api/cards?facets=false`) and only when they show."""
+        f = {"set": _csv(set), "rarity": _csv(rarity), "color": _csv(color), "type": _csv(type),
+             "finish": _csv(finish), "condition": _csv(condition), "language": _csv(language), "tag": _csv(tag),
+             "deck": deck or None, "min_price": min_price, "max_price": max_price}
+        return guard(browse.facet_counts, conn, q, f)
+
     @app.get("/api/card/{printing_id}")
     def api_card(printing_id: str):
         return guard(browse.card_detail, conn, printing_id)

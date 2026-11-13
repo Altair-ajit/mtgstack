@@ -75,6 +75,11 @@ def test_browse_import_and_lot_endpoints(tmp_path):
     assert page["total_rows"] == 2 and page["pages"] == 2 and page["rows"][0]["name"] == "Sol Ring"
     assert page["rows"][0]["finish"] == "foil" and page["rows"][0]["tags"] == ["box:1"]
     assert {f["value"] for f in page["facets"]["set"]} == {"cmm", "dmr"}
+    # the UI asks for the page and the filter counts apart: the counts cost several times the page
+    assert "facets" not in c.get("/api/cards", params={"facets": "false"}).json()
+    counts = c.get("/api/facets", params={"condition": "LP"}).json()
+    assert counts == c.get("/api/cards", params={"condition": "LP"}).json()["facets"]
+    assert {f["value"]: f["count"] for f in counts["set"]} == {"dmr": 3}
     blue = c.get("/api/cards", params={"color": "U", "condition": "LP"}).json()
     assert [r["name"] for r in blue["rows"]] == ["Counterspell"] and blue["totals"]["cards"] == 3
     lot = blue["rows"][0]["lots"][0]["lot_id"]

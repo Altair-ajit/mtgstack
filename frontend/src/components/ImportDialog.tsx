@@ -73,17 +73,32 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
   };
 
   if (!preview) {
+    // Opened from the Decks page this is "New deck": the name and format come first and the destination is settled.
+    const forDeck = dest0 === "deck";
+    const phone = window.matchMedia("(max-width: 760px)").matches;
+    const deckForm = (
+              <div className="deck-form">
+                <input placeholder="Deck name" value={deck.name} onChange={e => setDeck({ ...deck, name: e.target.value })} />
+                <select value={deck.format} onChange={e => setDeck({ ...deck, format: e.target.value })}>
+                  {["commander", "standard", "pioneer", "modern", "legacy", "vintage", "pauper", "brawl", "other"].map(f => <option key={f}>{f}</option>)}
+                </select>
+                <label className="check"><input type="checkbox" checked={deck.owned} onChange={e => setDeck({ ...deck, owned: e.target.checked })} /> I already own these cards (add them to my collection, in this deck)</label>
+                {!deck.owned && <label className="check"><input type="checkbox" checked={deck.building} onChange={e => setDeck({ ...deck, building: e.target.checked })} /> In progress: cards I add later go straight into this deck</label>}
+              </div>
+    );
     return (
-      <Modal title="Import cards" onClose={onClose} wide footer={<>
+      <Modal title={forDeck ? "New deck" : "Import cards"} onClose={onClose} wide footer={<>
         <button onClick={onClose}>Cancel</button>
         <button className="primary" disabled={!input.trim() || busy} onClick={runPreview}>{busy ? "Reading…" : "Preview import"}</button>
       </>}>
+        {forDeck && deckForm}
+        {forDeck && <h3>The decklist</h3>}
         <div className="tabs">
           <button className={tab === "paste" ? "on" : ""} onClick={() => setTab("paste")}>Paste list</button>
           <button className={tab === "file" ? "on" : ""} onClick={() => setTab("file")}>Upload .txt / .csv</button>
         </div>
         {tab === "paste" ? (
-          <textarea className="paste" value={text} onChange={e => setText(e.target.value)} placeholder={EXAMPLE} rows={12} autoFocus />
+          <textarea className="paste" value={text} onChange={e => setText(e.target.value)} placeholder={EXAMPLE} rows={phone ? 7 : 12} autoFocus={!phone} />
         ) : (
           <div className="dropzone" onClick={() => fileRef.current?.click()}
                onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) readFile(f); }}>
@@ -94,7 +109,7 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
         )}
         <p className="hint">From the TCGplayer app: open a collection → ⋮ → <b>Export</b>. For CSV, turn on <i>Product ID</i>, <i>Set Code</i> and <i>Card Number</i> in the app's CSV settings for exact printings.</p>
 
-        <h3>Add to</h3>
+        {!forDeck && <><h3>Add to</h3>
         <div className="dest">
           <label className={`dest-opt ${dest === "collection" ? "on" : ""}`}>
             <input type="radio" checked={dest === "collection"} onChange={() => setDest("collection")} />
@@ -105,17 +120,10 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
           <label className={`dest-opt ${dest === "deck" ? "on" : ""}`}>
             <input type="radio" checked={dest === "deck"} onChange={() => setDest("deck")} />
             <div><b>A new deck</b><div className="muted small">The list becomes a decklist.</div>
-              {dest === "deck" && <div className="deck-form">
-                <input placeholder="Deck name" value={deck.name} onChange={e => setDeck({ ...deck, name: e.target.value })} />
-                <select value={deck.format} onChange={e => setDeck({ ...deck, format: e.target.value })}>
-                  {["commander", "standard", "pioneer", "modern", "legacy", "vintage", "pauper", "brawl", "other"].map(f => <option key={f}>{f}</option>)}
-                </select>
-                <label className="check"><input type="checkbox" checked={deck.owned} onChange={e => setDeck({ ...deck, owned: e.target.checked })} /> I already own these cards (add them to my collection, in this deck)</label>
-                {!deck.owned && <label className="check"><input type="checkbox" checked={deck.building} onChange={e => setDeck({ ...deck, building: e.target.checked })} /> In progress: cards I add later go straight into this deck</label>}
-              </div>}
+              {dest === "deck" && deckForm}
             </div>
           </label>
-        </div>
+        </div></>}
       </Modal>
     );
   }

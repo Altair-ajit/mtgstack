@@ -136,7 +136,7 @@ export default function DeckDetail() {
         ))}
         {!data.entries.length && <p className="muted pad">Nothing in this view.</p>}
       </main>
-      {open && <CardDrawer printingId={open} onClose={() => setOpen(null)} />}
+      {open && <CardDrawer printingId={open} ids={[...new Set(groups.flatMap(([, es]) => es.map(e => e.card_printing_id)))]} onNavigate={setOpen} onClose={() => setOpen(null)} />}
       {adding && <AddCard deck={slug} onClose={() => setAdding(false)} />}
       {exporting && <ExportModal slug={slug} decks={(decks.data || []).length} initial={exporting} onClose={() => setExporting(null)} />}
     </div>

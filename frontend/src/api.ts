@@ -120,6 +120,8 @@ export const api = {
   syncCatalog: () => post("/api/catalog/sync"),
   cards: (q: string, f: Filters, sort: string, page: number, size: number, facets = true) =>
     get<CardsPage>(`/api/cards?${qs({ q, ...f, sort, page, size, facets })}`),
+  /** filter counts for the same search and filters as `cards` (asked for apart: they cost more than the page) */
+  facets: (q: string, f: Filters) => get<Record<string, Facet[]>>(`/api/facets?${qs({ q, ...f })}`),
   card: (id: string) => get<CardDetail>(`/api/card/${id}`),
   names: (text: string) => get<NameHit[]>(`/api/catalog/names?${qs({ text })}`),
   /** `complete`: fetch the card's full printing list if the card database isn't downloaded (for pickers) */

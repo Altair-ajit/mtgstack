@@ -24,5 +24,9 @@ const render = () => createRoot(document.getElementById("root")!).render(
 const selfTest = () => NATIVE && fetch(`${import.meta.env.BASE_URL}selftest.json`).then(r => r.json())
   .then(j => j.selftest && import("./local/selftest").then(m => m.run(engineEvents))).catch(() => {});
 
+// An app does not zoom: no pinch (iOS reports it as "gesture" events) and no double-tap zoom. The viewport tag and
+// touch-action in styles.css cover the rest; form text is 16px on phones so focusing a field does not zoom either.
+for (const ev of ["gesturestart", "gesturechange", "gestureend"]) document.addEventListener(ev, e => e.preventDefault());
+
 if (LOCAL) bootLocal().then(render).then(selfTest).catch(e => console.error(e));
 else render();
