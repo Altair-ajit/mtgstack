@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -17,7 +17,6 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate, previ
   /** picture and name of the list's cards: what a card shows if it is reached before its details have loaded */
   preview?: Record<string, { name: string; image: string | null }>;
 }) {
-  const qc = useQueryClient();
   const at = ids ? ids.indexOf(printingId) : -1;
   const step = (d: number) => { if (ids && onNavigate && at >= 0 && ids[at + d]) onNavigate(ids[at + d]); };
   const stepRef = useRef(step);
@@ -88,15 +87,8 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate, previ
       } else if (d.axis === "y" && d.top && dy > 110) onClose();
     },
   };
-  // The cards either side are loaded ahead, so one that is swiped in arrives whole instead of filling in afterwards.
-  useEffect(() => {
-    for (const d of [-1, 1]) {
-      const id = ids && at >= 0 ? ids[at + d] : undefined;
-      if (id) qc.prefetchQuery({ queryKey: ["card", id], queryFn: () => api.card(id), staleTime: 30_000 });
-    }
-  }, [printingId, at]); // eslint-disable-line
-  // a new card starts at its top
-  useEffect(() => { const el = track.current?.closest(".drawer"); if (el) el.scrollTop = 0; }, [printingId]);
+  // a new card starts at its top (before the browser paints, or the new card shows at the old scroll height first)
+  useLayoutEffect(() => { const el = track.current?.closest(".drawer"); if (el) el.scrollTop = 0; }, [printingId]);
   const navBar = (
     <div className="cd-nav">
       {at >= 0 && ids && ids.length > 1 && <>
@@ -107,19 +99,21 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate, previ
       <button className="cd-close" onClick={onClose} aria-label="Close">×</button>
     </div>
   );
-  const beside = peek ? neighbour(peek.dir) : undefined;
+  // The card on show and its two neighbours are all kept rendered, each keyed by its card. A neighbour waits hidden
+  // beside the track and is shown while it is dragged in; when the swipe completes that same rendered card becomes the
+  // one on show. Nothing is rebuilt, so its picture and details do not blink (rebuilding it in place did).
+  const slots = ([-1, 0, 1] as const).map(d => ({ d, id: d === 0 ? printingId : neighbour(d) })).filter(x => x.id);
   return (
     <Drawer onClose={onClose}>
       <div className="cd-wrap" {...swipe}>
         {navBar}
         <div className="cd-track" ref={track}>
-          {/* the card being swiped in: its whole view, beside the current one, starting at the same scroll height */}
-          {peek && beside && (
-            <div className={`cd-side ${peek.dir > 0 ? "next" : "prev"}`} style={{ top: peek.top }}>
-              <CardBody key={beside} printingId={beside} onClose={onClose} preview={preview} />
+          {slots.map(({ d, id }) => (
+            <div key={id} className={`cd-slot ${d === 0 ? "cur" : d > 0 ? "next" : "prev"} ${d !== 0 && peek?.dir === d ? "show" : ""}`}
+              style={d !== 0 ? { top: peek?.top || 0 } : undefined} aria-hidden={d !== 0}>
+              <CardBody printingId={id!} onClose={onClose} preview={preview} />
             </div>
-          )}
-          <CardBody key={printingId} printingId={printingId} onClose={onClose} preview={preview} />
+          ))}
         </div>
       </div>
     </Drawer>
@@ -144,7 +138,7 @@ function CardBody({ printingId, onClose, preview }: {
 
   if (!data) {
     const p = preview?.[printingId];
-    return p ? <div className="cd-peek"><CardImg src={p.image} name={p.name} size="lg" /><h2>{p.name}</h2></div>
+    return p ? <div className="cd-peek"><CardImg src={p.image} name={p.name} size="lg" eager /><h2>{p.name}</h2></div>
              : <p className="muted pad">{error ? String(error) : "Loading…"}</p>;
   }
   const c = data.card;
@@ -154,7 +148,7 @@ function CardBody({ printingId, onClose, preview }: {
   return (
       <div className="cd">
         <div className="cd-top">
-          <CardImg src={c.image_normal} name={c.name} size="lg" />
+          <CardImg src={c.image_normal} name={c.name} size="lg" eager />
           <div className="cd-info">
             <h2>{c.name} <Mana cost={c.mana_cost} /></h2>
             <div className="muted">{c.type_line}</div>

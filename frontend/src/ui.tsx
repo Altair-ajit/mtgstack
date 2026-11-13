@@ -48,11 +48,12 @@ export function FinishBadge({ f }: { f: string | null | undefined }) {
   return null;
 }
 
-export function CardImg({ src, name, size = "sm", onClick }: { src?: string | null; name: string; size?: "sm" | "md" | "lg"; onClick?: () => void }) {
+/** `eager`: load now even when off screen (a card waiting beside the one on show must not arrive blank). */
+export function CardImg({ src, name, size = "sm", onClick, eager }: { src?: string | null; name: string; size?: "sm" | "md" | "lg"; onClick?: () => void; eager?: boolean }) {
   const [broken, setBroken] = useState(false);
   if (!src || broken)
     return <div className={`card-img ph ${size}`} onClick={onClick}><span>{name}</span></div>;
-  return <img className={`card-img ${size}`} src={src} alt={name} loading="lazy" onError={() => setBroken(true)} onClick={onClick} />;
+  return <img className={`card-img ${size}`} src={src} alt={name} loading={eager ? "eager" : "lazy"} decoding={eager ? "sync" : "async"} onError={() => setBroken(true)} onClick={onClick} />;
 }
 
 /** Thumbnail that shows the large image on hover, like a marketplace listing. */
