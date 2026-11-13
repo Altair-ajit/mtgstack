@@ -568,3 +568,4 @@ h1 .rename { font-size: 16px; vertical-align: middle; padding: 2px 6px; } .deck-
 .cd-peek .card-img.lg { width: min(62vw, 260px); } .cd-peek h2 { font-size: 19px; margin: 0; align-self: flex-start; }
 .cd-peek.next, .cd-peek.prev { position: absolute; top: 0; width: 100%; box-sizing: border-box; } .cd-peek.next { left: 100%; } .cd-peek.prev { right: 100%; }
 @media (max-width: 760px) { .drawer { overflow-x: hidden; } .cd-track { touch-action: pan-y; will-change: transform; } }
+.cd-side { position: absolute; top: 0; width: 100%; box-sizing: border-box; } .cd-side.next { left: 100%; } .cd-side.prev { right: 100%; }

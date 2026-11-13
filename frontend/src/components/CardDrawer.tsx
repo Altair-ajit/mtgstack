@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api";
@@ -13,12 +14,10 @@ export function allocationText(a: Allocation[]) {
  * arrow buttons and keys, and a sideways swipe on phones. */
 export default function CardDrawer({ printingId, onClose, ids, onNavigate, preview }: {
   printingId: string; onClose: () => void; ids?: string[]; onNavigate?: (id: string) => void;
-  /** picture and name of the list's cards, to show a neighbour while it is being swiped in and until it loads */
+  /** picture and name of the list's cards: what a card shows if it is reached before its details have loaded */
   preview?: Record<string, { name: string; image: string | null }>;
 }) {
   const qc = useQueryClient();
-  const toast = useToast();
-  const { data, isLoading, error } = useQuery({ queryKey: ["card", printingId], queryFn: () => api.card(printingId), placeholderData: p => p });
   const at = ids ? ids.indexOf(printingId) : -1;
   const step = (d: number) => { if (ids && onNavigate && at >= 0 && ids[at + d]) onNavigate(ids[at + d]); };
   const stepRef = useRef(step);
@@ -47,9 +46,10 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate, previ
     t.style.transition = "transform .18s ease-out";
     t.style.transform = to;
     window.setTimeout(() => {
-      then?.();
+      // the new card must be on screen before the track snaps back to the middle, or the old one flashes there
+      peekDir.current = 0;
+      flushSync(() => { then?.(); setPeek(null); });
       t.style.transition = "none"; t.style.transform = "";
-      peekDir.current = 0; setPeek(null);
     }, 190);
   };
   const swipe = {
@@ -88,12 +88,15 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate, previ
       } else if (d.axis === "y" && d.top && dy > 110) onClose();
     },
   };
+  // The cards either side are loaded ahead, so one that is swiped in arrives whole instead of filling in afterwards.
+  useEffect(() => {
+    for (const d of [-1, 1]) {
+      const id = ids && at >= 0 ? ids[at + d] : undefined;
+      if (id) qc.prefetchQuery({ queryKey: ["card", id], queryFn: () => api.card(id), staleTime: 30_000 });
+    }
+  }, [printingId, at]); // eslint-disable-line
   // a new card starts at its top
   useEffect(() => { const el = track.current?.closest(".drawer"); if (el) el.scrollTop = 0; }, [printingId]);
-  const glimpse = (id: string | undefined, cls: string, top = 0) => {
-    const p = id ? preview?.[id] : undefined;
-    return p ? <div className={`cd-peek ${cls}`} style={top ? { top } : undefined}><CardImg src={p.image} name={p.name} size="lg" /><h2>{p.name}</h2></div> : null;
-  };
   const navBar = (
     <div className="cd-nav">
       {at >= 0 && ids && ids.length > 1 && <>
@@ -104,6 +107,32 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate, previ
       <button className="cd-close" onClick={onClose} aria-label="Close">×</button>
     </div>
   );
+  const beside = peek ? neighbour(peek.dir) : undefined;
+  return (
+    <Drawer onClose={onClose}>
+      <div className="cd-wrap" {...swipe}>
+        {navBar}
+        <div className="cd-track" ref={track}>
+          {/* the card being swiped in: its whole view, beside the current one, starting at the same scroll height */}
+          {peek && beside && (
+            <div className={`cd-side ${peek.dir > 0 ? "next" : "prev"}`} style={{ top: peek.top }}>
+              <CardBody key={beside} printingId={beside} onClose={onClose} preview={preview} />
+            </div>
+          )}
+          <CardBody key={printingId} printingId={printingId} onClose={onClose} preview={preview} />
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+/** Everything about one card: picture, prices, your copies, decks that want it, every printing. */
+function CardBody({ printingId, onClose, preview }: {
+  printingId: string; onClose: () => void; preview?: Record<string, { name: string; image: string | null }>;
+}) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const { data, error } = useQuery({ queryKey: ["card", printingId], queryFn: () => api.card(printingId), staleTime: 30_000 });
   const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
   const [adding, setAdding] = useState<string | null>(null);
   const [form, setForm] = useState({ qty: 1, finish: "nonfoil" as Finish, condition: "NM" });
@@ -113,21 +142,17 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate, previ
     try { await p; toast(ok); refresh(); } catch (e) { toast(String((e as Error).message), "err"); }
   };
 
-  if (isLoading || !data) return <Drawer onClose={onClose}><div className="cd-wrap" {...swipe}>{navBar}
-    <div className="cd-track" ref={track}>{glimpse(printingId, "here") || <p className="muted pad">{error ? String(error) : "Loading…"}</p>}</div></div></Drawer>;
+  if (!data) {
+    const p = preview?.[printingId];
+    return p ? <div className="cd-peek"><CardImg src={p.image} name={p.name} size="lg" /><h2>{p.name}</h2></div>
+             : <p className="muted pad">{error ? String(error) : "Loading…"}</p>;
+  }
   const c = data.card;
   const priceRows = ["nonfoil", "foil", "etched"].filter(f => data.prices.some(p => p.finish === f));
   const quote = (f: string, src: string, kind: string) => data.prices.find(p => p.finish === f && p.source === src && p.kind === kind)?.price;
 
   return (
-    <Drawer onClose={onClose}>
-      <div className="cd-wrap" {...swipe}>
-      {navBar}
-      <div className="cd-track" ref={track}>
-      {peek && glimpse(neighbour(peek.dir), peek.dir > 0 ? "next" : "prev", peek.top)}
-      {/* just swiped to: its picture and name stand in until the details arrive, instead of the previous card */}
-      {c.id !== printingId && glimpse(printingId, "here")}
-      <div className={`cd ${c.id !== printingId ? (preview?.[printingId] ? "gone" : "fetching") : ""}`}>
+      <div className="cd">
         <div className="cd-top">
           <CardImg src={c.image_normal} name={c.name} size="lg" />
           <div className="cd-info">
@@ -236,8 +261,5 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate, previ
           </tbody>
         </table>
       </div>
-      </div>
-      </div>
-    </Drawer>
   );
 }
