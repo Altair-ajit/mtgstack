@@ -376,6 +376,37 @@ def outline_from(img: np.ndarray, corners) -> np.ndarray | None:
     return _order(refine(_gradient(img), q, radius=max(3, int(max(h, w) / 300))))
 
 
+SIG_N = 8                                # the signature is SIG_N x SIG_N colour cells of the picture box
+
+
+def signature(img: np.ndarray, corners: np.ndarray) -> list[list[int]]:
+    """A tiny colour fingerprint of the card's picture, for telling live "the same card is still there" from
+    "another card took its place" without a full scan. Taken on the straightened card, so it follows the card
+    as the camera or the card moves. Two versions, one per way up (the outline does not say which end is the top);
+    `signature_match` compares them. Whole-card or greyscale thumbnails do not work for this: every card shares
+    the same frame layout, which swamps the difference between two pictures."""
+    card = warp(img, corners)
+    out = []
+    for c in (card, card[::-1, ::-1]):
+        x0, y0, x1, y1 = ART_BOXES[0]
+        art = c[int(y0 * H):int(y1 * H), int(x0 * W):int(x1 * W)]
+        s = cv2.resize(art, (SIG_N, SIG_N), interpolation=cv2.INTER_AREA).astype(np.float32)
+        s -= s.mean((0, 1), keepdims=True)
+        out.append(np.clip(np.rint(s), -127, 127).astype(int).ravel().tolist())
+    return out
+
+
+def signature_match(a: list[list[int]], b: list[list[int]]) -> float:
+    """-1..1: how alike two signatures are (the same card scores about 0.8+, another card about 0.2). The Scan
+    page does this sum itself; it is here for tests and tools. A featureless picture cannot tell: 1.0."""
+    x = np.asarray(a[0], np.float32)
+    best = -1.0
+    for y in (np.asarray(v, np.float32) for v in b):
+        den = float(np.sqrt((x * x).sum() * (y * y).sum()))
+        best = max(best, float((x * y).sum()) / den if den > 1e3 else 1.0)
+    return best
+
+
 def track(img: np.ndarray) -> dict:
     """Cheap per-frame report for live camera guidance: where the card is and whether it's ready to capture."""
     h, w = img.shape[:2]
@@ -392,7 +423,7 @@ def track(img: np.ndarray) -> dict:
     cut = bool(((corners[:, 0] < m) | (corners[:, 0] > w - 1 - m) | (corners[:, 1] < m) | (corners[:, 1] > h - 1 - m)).any())
     hint = ("card is cut off - move back" if cut else "move closer" if fill < 0.12
             else "too blurry - hold still" if sharp < 60 else "ready")
-    return {"found": True, "score": score, "corners": (corners / [w, h]).round(4).tolist(),
+    return {"found": True, "score": score, "corners": (corners / [w, h]).round(4).tolist(), "sig": signature(img, corners),
             "fill": round(float(fill), 3), "sharpness": round(sharp, 1), "cut_off": cut, "hint": hint}
 
 

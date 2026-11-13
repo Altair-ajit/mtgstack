@@ -17,7 +17,7 @@ interface ScanResult {
   prices?: Partial<Record<Finish, number | null>>;
 }
 interface LogItem { id: number; name: string; set: string; finish: Finish; lot: number; allocations: Allocation[]; kept?: boolean }
-type Track = { found: boolean; corners?: [number, number][]; hint?: string };
+type Track = { found: boolean; corners?: [number, number][]; hint?: string; sig?: number[][] };
 type Mode = "single" | "batch";
 
 const loadBatch = (): BatchItem[] => { try { return JSON.parse(localStorage.getItem("mtg.scan.batch") || "[]"); } catch { return []; } };
@@ -55,8 +55,7 @@ export default function Scan() {
   const toast = useToast();
   const qc = useQueryClient();
   const st = useRef({ history: [] as ([number, number][] | null)[], armed: true, busy: false, away: 0,
-    thumb: null as Float32Array | null });
-  const thumbCanvas = useRef<HTMLCanvasElement | null>(null);
+    sig: null as number[][] | null });
 
   useEffect(() => () => stream?.getTracks().forEach(t => t.stop()), [stream]);
   useEffect(() => { localStorage.setItem("mtg.scan.batch", JSON.stringify(items)); }, [items]);
@@ -113,26 +112,14 @@ export default function Scan() {
     }
     return n;
   };
-  /** What the card's spot looks like, tiny and brightness-independent: tells when the card there was swapped. */
-  const thumb = (c: [number, number][]): Float32Array | null => {
-    // read from the very frame the outline was found on (the tracker's canvas), not the live video: the picture
-    // moves on while a frame is being tracked, and a hand-held phone drifts
-    const src = canvases.current.small;
-    if (!src?.width) return null;
-    const v = { videoWidth: src.width, videoHeight: src.height };
-    const cv = thumbCanvas.current || (thumbCanvas.current = Object.assign(document.createElement("canvas"), { width: 16, height: 16 }));
-    const xs = c.map(p => p[0]), ys = c.map(p => p[1]);
-    const x0 = Math.max(0, Math.min(...xs)) * v.videoWidth, y0 = Math.max(0, Math.min(...ys)) * v.videoHeight;
-    const w = Math.min(1, Math.max(...xs)) * v.videoWidth - x0, h = Math.min(1, Math.max(...ys)) * v.videoHeight - y0;
-    if (w < 8 || h < 8) return null;
-    const g2 = cv.getContext("2d", { willReadFrequently: true })!;
-    g2.drawImage(src, x0, y0, w, h, 0, 0, 16, 16);
-    const d = g2.getImageData(0, 0, 16, 16).data, out = new Float32Array(256);
-    let mean = 0;
-    for (let i = 0; i < 256; i++) { out[i] = 0.3 * d[4 * i] + 0.59 * d[4 * i + 1] + 0.11 * d[4 * i + 2]; mean += out[i] / 256; }
-    for (let i = 0; i < 256; i++) out[i] -= mean;
-    return out;
-  };
+  /** How alike two tracker signatures are (-1..1): the same card scores about 0.8, another card about 0.2.
+   * See detect.signature: the picture box of the straightened card in colour, one version per way up. */
+  const alike = (a: number[][], b: number[][]) => Math.max(...b.map(y => {
+    let xy = 0, xx = 0, yy = 0;
+    for (let i = 0; i < y.length; i++) { xy += a[0][i] * y[i]; xx += a[0][i] * a[0][i]; yy += y[i] * y[i]; }
+    const den = Math.sqrt(xx * yy);
+    return den > 1e3 ? xy / den : 1;               // a featureless picture cannot tell: assume the same card
+  }));
   const maybeAuto = async (r: Track) => {
     const s = st.current;
     s.history.push(r.found && r.hint === "ready" ? r.corners! : null);
@@ -142,15 +129,14 @@ export default function Scan() {
     // identical copy gets counted). The comparison follows the card, so a hand-held phone drifting, or the card
     // sliding, is not a new card; and it must hold for two frames, so one blurred frame is not either.
     if (!s.armed) {
-      const t = r.found && r.corners && s.thumb ? thumb(r.corners) : null;
-      const differs = !!t && t.reduce((n, x, i) => n + Math.abs(x - s.thumb![i]), 0) / 256 > 26;
+      const differs = !!(r.found && r.sig && s.sig) && alike(s.sig!, r.sig!) < 0.6;
       s.away = !r.found || differs ? s.away + 1 : 0;
       // whatever re-armed it (often a hand on the card) may still be in the picture: wait for a fresh steady view
       if (s.away >= 2) { s.armed = true; s.away = 0; s.history = []; }
     }
     // two ready (sharp, uncut) frames in a row that agree on where the card is: it has stopped moving
     if (!auto || !s.armed || !r.corners || steady() < 1) return;
-    s.armed = false; s.away = 0; s.thumb = thumb(r.corners);
+    s.armed = false; s.away = 0; s.sig = r.sig || null;
     await send([await grab()], r.corners);
     s.history = [];
   };

@@ -309,6 +309,36 @@ def test_confident_picture_match_reads_as_little_text_as_it_needs(mcat, conn, mo
     assert any("before cards had a collector line" in e for e in r.evidence)
 
 
+def test_live_signature_tells_the_same_card_from_another():
+    """Autocapture scans a card once: the tracker's signature must survive the outline wobbling and the card
+    being turned round, and change when another card takes its place."""
+    import cv2
+    from mtgstack.scanner import detect
+    rng = np.random.default_rng(5)
+
+    def pictured(seed):                            # the synthetic cards have no artwork: paint some
+        img = card_image("Brass Orrery", "CMR", "358")
+        h, w = img.shape[:2]
+        blobs = np.random.default_rng(seed).integers(0, 255, (6, 6, 3)).astype(np.uint8)
+        x0, y0, x1, y1 = detect.ART_BOXES[0]
+        img[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)] = cv2.resize(
+            blobs, (int(x1 * w) - int(x0 * w), int(y1 * h) - int(y0 * h)), interpolation=cv2.INTER_CUBIC)
+        return photo(img)
+
+    a, b = detect.load(pictured(1)), detect.load(pictured(2))
+    qa, qb = detect.find_card(a), detect.find_card(b)
+    sa = detect.signature(a, qa)
+    assert len(sa) == 2 and len(sa[0]) == 3 * detect.SIG_N ** 2
+    size = np.linalg.norm(qa[0] - qa[2])
+    wobbly = qa + rng.uniform(-0.02, 0.02, qa.shape) * size
+    assert detect.signature_match(sa, detect.signature(a, wobbly)) > 0.7
+    assert detect.signature_match(sa, detect.signature(a, np.roll(qa, 2, axis=0))) > 0.9     # turned round
+    assert detect.signature_match(sa, detect.signature(b, qb)) < 0.5
+    assert detect.track(a)["sig"] == sa
+    flat = np.full((3 * detect.SIG_N ** 2,), 0).tolist()
+    assert detect.signature_match([flat, flat], sa) == 1.0                                    # cannot tell
+
+
 def test_tracked_outline_saves_finding_the_card_again(mcat, monkeypatch):
     from mtgstack.scanner import detect
     img = detect.load(photo(card_image("Brass Orrery", "CMR", "358")))
