@@ -142,6 +142,7 @@ class Scanner:
         cards, rd, flipped = best
         if flipped:
             res.evidence.append("card was upside down; rotated")
+        self._titles_online(rd, idx, res)
         cl = rd["collector"]
         res.markers = {**res.markers, "title_ocr": rd["titles"], "type_ocr": rd["types"],
                        "collector_ocr": [v.raw for v in rd["cl_variants"]],
@@ -347,6 +348,32 @@ class Scanner:
         strength = (2 if top >= 80 else 1 if top >= 65 else 0) + (1 if cl_hits else 0)
         return {"titles": titles, "types": types, "cl_variants": cl_variants, "collector": cl_best,
                 "name_hits": name_hits, "cl_hits": cl_hits, "strength": strength}
+
+    def _titles_online(self, rd: dict, idx: "NameIndex", res: ScanResult) -> None:
+        """Card database not downloaded: the title can only match the few names known locally, so a title read
+        perfectly still finds nothing. Ask Scryfall's fuzzy name search about the best readings (two at most)."""
+        if not idx.small or (rd["name_hits"] and rd["name_hits"][0][1] >= 80):
+            return
+        hits, asked = dict(rd["name_hits"]), 0
+        for t in rd["titles"]:
+            if asked >= 2 or len(NameIndex.norm(t).replace(" ", "")) < 4:
+                continue
+            asked += 1
+            try:
+                found = self.catalog.client.named(t)
+            except Exception as e:                      # offline: carry on with what is known locally
+                import logging
+                logging.getLogger("mtgstack.scanner").info("could not look up the title online: %s", e)
+                break
+            if not found or not found.get("name"):
+                continue
+            score = NameIndex.score(t, found["name"])
+            if score > hits.get(found["name"], 0.0):
+                hits[found["name"]] = score
+                res.evidence.append(f"title looked up online: {found['name']} ({score:.0f}%)")
+            if score >= 80:
+                break
+        rd["name_hits"] = sorted(hits.items(), key=lambda kv: -kv[1])
 
     def _decide(self, rd: dict, res: ScanResult, border: str, card: np.ndarray):
         from rapidfuzz import fuzz

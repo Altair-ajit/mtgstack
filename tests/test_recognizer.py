@@ -289,6 +289,35 @@ def test_matched_printings_missing_from_the_catalog_are_fetched(conn):
     assert r.recognizer == "ocr"                       # nothing to go on: falls back without crashing
 
 
+def test_title_is_looked_up_online_when_the_card_database_is_missing(conn):
+    """Card database not downloaded and no picture match: a title that was read must still name the card."""
+    asked = []
+
+    class Client:
+        def named(self, name, fuzzy=True):
+            asked.append(name)
+            return card("Brass Orrery", "cmr", "358") if "rass" in name else None
+
+        def prints_of(self, name):
+            return [card("Brass Orrery", "cmr", "358"), card("Brass Orrery", "roe", "101")]
+
+        def by_set_cn(self, *a, **k):
+            return None
+    NameIndex._cache.clear()
+    img = photo(card_image("Brass Orrery", "CMR", "358"))
+    r = Scanner(Catalog(conn, client=Client(), online=True), fetch_images=False, recognizer=None).scan([img])
+    assert r.name == "Brass Orrery" and r.recognizer == "ocr" and asked
+    assert any("looked up online" in e for e in r.evidence)
+
+    class Down(Client):
+        def named(self, name, fuzzy=True):
+            raise OSError("no network")
+    NameIndex._cache.clear()
+    r = Scanner(Catalog(conn, client=Down(), online=True), fetch_images=False, recognizer=None).scan(
+        [photo(card_image("Iron Gyre", "DOM", "90"))])
+    assert r.name is None                              # offline: no guess, no crash
+
+
 def test_hints_from_the_caller_and_broken_models(mcat):
     img = photo(card_image("Brass Orrery", "CMR", "358"))
     hints = [{"printing_id": U("roe/101"), "score": 0.91, "group": 1}, {"printing_id": U("cmr/358"), "score": 0.9, "group": 1},

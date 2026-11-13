@@ -27,7 +27,7 @@ import zipfile
 from collections import Counter
 from pathlib import Path
 
-SCANNER_VERSION = "2026.11.12-model4"
+SCANNER_VERSION = "2026.11.12-model5"
 
 
 def scans_dir() -> Path:
