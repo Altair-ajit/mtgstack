@@ -25,6 +25,24 @@ export default function DeckDetail() {
   const qc = useQueryClient();
   const toast = useToast();
   const nav = useNavigate();
+  const [renaming, setRenaming] = useState<string | null>(null);
+  // A deck's cards carry the tag deck:<slug> and the slug comes from the name, so a rename moves the tag (the server
+  // does it) and this page's address. The scanner's remembered deck choice follows too.
+  const rename = async () => {
+    if (renaming === null || !renaming.trim()) return;
+    try {
+      const r = await api.patchDeck(slug, { name: renaming.trim() });
+      if (r.slug !== slug) {
+        const saved = (localStorage.getItem("mtg.scan.tags") || "").split(/[ ,]+/).filter(Boolean)
+          .map(t => (t === `deck:${slug}` || t.startsWith(`deck:${slug}:`) ? `deck:${r.slug}${t.slice(`deck:${slug}`.length)}` : t));
+        localStorage.setItem("mtg.scan.tags", saved.join(" "));
+      }
+      setRenaming(null);
+      await qc.invalidateQueries();
+      toast(`Renamed to ${r.name}`);
+      if (r.slug !== slug) nav(`/decks/${r.slug}`, { replace: true });
+    } catch (e) { toast(String((e as Error).message), "err"); }
+  };
 
   const query = [tab !== "all" && `status:${tab}`, q, `sort:${sort === "type" ? "type" : sort}`].filter(Boolean).join(" ");
   const { data, error } = useQuery({ queryKey: ["deck", slug, query], queryFn: () => api.deck(slug, query), placeholderData: keepPreviousData });
@@ -61,7 +79,16 @@ export default function DeckDetail() {
         <div className="deck-hero">
           {cover?.image_normal && <div className="hero-art" style={{ backgroundImage: `url(${cover.image_normal})` }} />}
           <div className="hero-main">
-            <h1>{d.name}</h1>
+            {renaming === null ? (
+              <h1>{d.name} <button className="icon rename" onClick={() => setRenaming(d.name)} aria-label="Rename deck" title="Rename deck">✎</button></h1>
+            ) : (
+              <div className="deck-rename">
+                <input autoFocus value={renaming} maxLength={80} onChange={e => setRenaming(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") rename(); if (e.key === "Escape") setRenaming(null); }} />
+                <button className="primary" disabled={!renaming.trim() || renaming.trim() === d.name} onClick={rename}>Save</button>
+                <button className="link" onClick={() => setRenaming(null)}>Cancel</button>
+              </div>
+            )}
             <div className="muted">{d.format}</div>
             <div className="seg mt">
               <button className={building ? "on" : ""} onClick={() => run(api.patchDeck(slug, { status: "building" }), "In progress: new cards it needs go straight in")}>In progress</button>
@@ -136,7 +163,8 @@ export default function DeckDetail() {
         ))}
         {!data.entries.length && <p className="muted pad">Nothing in this view.</p>}
       </main>
-      {open && <CardDrawer printingId={open} ids={[...new Set(groups.flatMap(([, es]) => es.map(e => e.card_printing_id)))]} onNavigate={setOpen} onClose={() => setOpen(null)} />}
+      {open && <CardDrawer printingId={open} ids={[...new Set(groups.flatMap(([, es]) => es.map(e => e.card_printing_id)))]} onNavigate={setOpen}
+        preview={Object.fromEntries((data.entries || []).map(e => [e.card_printing_id, { name: e.name, image: e.image_normal || e.image_small }]))} onClose={() => setOpen(null)} />}
       {adding && <AddCard deck={slug} onClose={() => setAdding(false)} />}
       {exporting && <ExportModal slug={slug} decks={(decks.data || []).length} initial={exporting} onClose={() => setExporting(null)} />}
     </div>

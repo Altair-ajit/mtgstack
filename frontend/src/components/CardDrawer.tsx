@@ -11,8 +11,10 @@ export function allocationText(a: Allocation[]) {
 
 /** `ids` + `onNavigate`: the cards of the list this was opened from, in its order. The view then steps through them:
  * arrow buttons and keys, and a sideways swipe on phones. */
-export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
+export default function CardDrawer({ printingId, onClose, ids, onNavigate, preview }: {
   printingId: string; onClose: () => void; ids?: string[]; onNavigate?: (id: string) => void;
+  /** picture and name of the list's cards, to show a neighbour while it is being swiped in and until it loads */
+  preview?: Record<string, { name: string; image: string | null }>;
 }) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -29,33 +31,69 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, []);
-  // Phones: the view is a sheet. Sideways swipes step through the list; dragging it down from its bar (or from
-  // the content when that is scrolled to the top) follows the finger and closes it past a third of the way.
-  const drag = useRef<{ x: number; y: number; top: boolean; el: HTMLElement | null } | null>(null);
+  // Phones: the view is a sheet, and it moves with the finger like a stack of cards.
+  //   sideways: the card slides and the next (or previous) one comes in beside it; let go past about a quarter of the
+  //             width and it carries on to that card, otherwise it springs back. At either end of the list it resists.
+  //   down, from the bar or from content scrolled to the top: the sheet follows and closes past a third.
+  const track = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; y: number; top: boolean; el: HTMLElement | null; axis: "" | "x" | "y" } | null>(null);
+  const [peek, setPeek] = useState<{ dir: 1 | -1; top: number } | null>(null);
+  const peekDir = useRef(0);
   const phone = () => window.matchMedia("(max-width: 760px)").matches;
+  const neighbour = (d: number) => (ids && at >= 0 ? ids[at + d] : undefined);
+  const settle = (to: string, then?: () => void) => {
+    const t = track.current;
+    if (!t) { then?.(); return; }
+    t.style.transition = "transform .18s ease-out";
+    t.style.transform = to;
+    window.setTimeout(() => {
+      then?.();
+      t.style.transition = "none"; t.style.transform = "";
+      peekDir.current = 0; setPeek(null);
+    }, 190);
+  };
   const swipe = {
     onTouchStart: (e: React.TouchEvent) => {
+      if ((e.target as HTMLElement).closest?.("input, select, textarea")) { drag.current = null; return; }
       const el = (e.currentTarget as HTMLElement).closest(".drawer") as HTMLElement | null;
       const inBar = !!(e.target as HTMLElement).closest(".cd-nav");
-      drag.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, top: inBar || !el || el.scrollTop <= 0, el };
+      drag.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, top: inBar || !el || el.scrollTop <= 0, el, axis: "" };
     },
     onTouchMove: (e: React.TouchEvent) => {
       const d = drag.current;
-      if (!d || !d.top || !d.el || !phone()) return;
+      if (!d || !phone()) return;
       const dx = e.touches[0].clientX - d.x, dy = e.touches[0].clientY - d.y;
-      if (dy > 0 && dy > Math.abs(dx)) { d.el.style.transition = "none"; d.el.style.transform = `translateY(${dy}px)`; }
+      if (!d.axis) {
+        if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+        d.axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y";
+      }
+      if (d.axis === "x" && track.current) {
+        const dir = dx < 0 ? 1 : -1;
+        if (dir !== peekDir.current) { peekDir.current = dir; setPeek({ dir, top: d.el?.scrollTop || 0 }); }
+        track.current.style.transition = "none";
+        track.current.style.transform = `translateX(${neighbour(dir) ? dx : dx * 0.25}px)`;
+      } else if (d.axis === "y" && d.top && d.el && dy > 0) {
+        d.el.style.transition = "none"; d.el.style.transform = `translateY(${dy}px)`;
+      }
     },
     onTouchEnd: (e: React.TouchEvent) => {
       const d = drag.current; drag.current = null;
       if (!d) return;
       if (d.el) { d.el.style.transition = ""; d.el.style.transform = ""; }
-      if ((e.target as HTMLElement).closest?.("input, select, textarea")) return;
       const dx = e.changedTouches[0].clientX - d.x, dy = e.changedTouches[0].clientY - d.y;
-      if (phone() && d.top && dy > 110 && dy > 2 * Math.abs(dx)) onClose();
-      else if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
+      if (d.axis === "x") {
+        const dir = dx < 0 ? 1 : -1, w = track.current?.offsetWidth || window.innerWidth;
+        if (neighbour(dir) && Math.abs(dx) > Math.min(120, w * 0.26)) settle(`translateX(${dir > 0 ? -w : w}px)`, () => step(dir));
+        else settle("");
+      } else if (d.axis === "y" && d.top && dy > 110) onClose();
     },
   };
-  // always on screen while the card scrolls under it: where you are in the list, and the way out
+  // a new card starts at its top
+  useEffect(() => { const el = track.current?.closest(".drawer"); if (el) el.scrollTop = 0; }, [printingId]);
+  const glimpse = (id: string | undefined, cls: string, top = 0) => {
+    const p = id ? preview?.[id] : undefined;
+    return p ? <div className={`cd-peek ${cls}`} style={top ? { top } : undefined}><CardImg src={p.image} name={p.name} size="lg" /><h2>{p.name}</h2></div> : null;
+  };
   const navBar = (
     <div className="cd-nav">
       {at >= 0 && ids && ids.length > 1 && <>
@@ -75,7 +113,8 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
     try { await p; toast(ok); refresh(); } catch (e) { toast(String((e as Error).message), "err"); }
   };
 
-  if (isLoading || !data) return <Drawer onClose={onClose}><div {...swipe}>{navBar}<p className="muted pad">{error ? String(error) : "Loading…"}</p></div></Drawer>;
+  if (isLoading || !data) return <Drawer onClose={onClose}><div className="cd-wrap" {...swipe}>{navBar}
+    <div className="cd-track" ref={track}>{glimpse(printingId, "here") || <p className="muted pad">{error ? String(error) : "Loading…"}</p>}</div></div></Drawer>;
   const c = data.card;
   const priceRows = ["nonfoil", "foil", "etched"].filter(f => data.prices.some(p => p.finish === f));
   const quote = (f: string, src: string, kind: string) => data.prices.find(p => p.finish === f && p.source === src && p.kind === kind)?.price;
@@ -84,7 +123,11 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
     <Drawer onClose={onClose}>
       <div className="cd-wrap" {...swipe}>
       {navBar}
-      <div className={`cd ${c.id !== printingId ? "fetching" : ""}`}>
+      <div className="cd-track" ref={track}>
+      {peek && glimpse(neighbour(peek.dir), peek.dir > 0 ? "next" : "prev", peek.top)}
+      {/* just swiped to: its picture and name stand in until the details arrive, instead of the previous card */}
+      {c.id !== printingId && glimpse(printingId, "here")}
+      <div className={`cd ${c.id !== printingId ? (preview?.[printingId] ? "gone" : "fetching") : ""}`}>
         <div className="cd-top">
           <CardImg src={c.image_normal} name={c.name} size="lg" />
           <div className="cd-info">
@@ -192,6 +235,7 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
             ))}
           </tbody>
         </table>
+      </div>
       </div>
       </div>
     </Drawer>

@@ -85,6 +85,44 @@ def test_scanning_into_a_deck_grows_its_list(conn, cat):
     assert got == {"Sol Ring": 2, "Counterspell": 2}
 
 
+def test_a_card_moved_into_a_deck_shows_on_its_list(conn, cat):
+    """Moving a copy from the collection into a deck by hand tags it; the deck page lists entries, so the list
+    must grow with it or the card is in the deck and nowhere to be seen."""
+    slug = decks.create_deck(conn, "Test Deck", "commander", status="building")
+    lot = col.add(conn, pid(cat, "Counterspell", "dmr"), 3, "nonfoil", "NM", "en", auto_allocate=False)
+    decks.send(conn, lot, 2, slug)
+    rep = decks.reconcile(conn, slug)
+    assert [(e["name"], e["wanted"], e["in_deck"]) for e in rep["entries"]] == [("Counterspell", 2, 2)]
+    decks.send(conn, query(conn, "counterspell -tag:deck:*")[0]["lot_id"], 1, slug, board="side")
+    got = {(e["name"], e["board"]): e["wanted"] for e in decks.reconcile(conn, slug)["entries"]}
+    assert got == {("Counterspell", "main"): 2, ("Counterspell", "side"): 1}
+    # taking it back out does not shrink the list: it is still a card the deck wants
+    decks.send(conn, query(conn, "counterspell tag:deck:test-deck")[0]["lot_id"], None, None)
+    assert {e["wanted"] for e in decks.reconcile(conn, slug)["entries"]} == {2, 1}
+
+
+def test_renaming_a_deck_moves_its_tags_and_list(conn, cat):
+    slug = decks.create_deck(conn, "Test Deck", "commander", status="building")
+    for board in ("main", "side"):
+        lot = col.add(conn, pid(cat, "Sol Ring", "cmm"), 1, "foil", "NM", "en", auto_allocate=False)
+        decks.send(conn, lot, 1, slug, board=board)
+    d = decks.update_deck(conn, slug, name="  Atraxa   Superfriends ")
+    assert (d["slug"], d["name"], d["format"], d["status"]) == ("atraxa-superfriends", "Atraxa Superfriends", "commander", "building")
+    assert [x["slug"] for x in decks.list_decks(conn)] == ["atraxa-superfriends"]
+    tags = sorted(r[0] for r in conn.execute("SELECT DISTINCT tag FROM lot_tags"))
+    assert tags == ["deck:atraxa-superfriends", "deck:atraxa-superfriends:side"]
+    rep = decks.reconcile(conn, "atraxa-superfriends")
+    assert rep["totals"]["in_deck"] == 2 and len(rep["entries"]) == 2            # still its cards, still its list
+    # same slug, new spelling: only the name changes; a name another deck has is refused
+    assert decks.update_deck(conn, "atraxa-superfriends", name="ATRAXA superfriends")["slug"] == "atraxa-superfriends"
+    decks.create_deck(conn, "Other", "modern")
+    import pytest
+    with pytest.raises(ValueError, match="already have a deck"):
+        decks.update_deck(conn, "other", name="Atraxa Superfriends")
+    with pytest.raises(ValueError, match="needs a name"):
+        decks.update_deck(conn, "other", name="   ")
+
+
 def test_deck_from_tags(conn, cat):
     own(conn, cat)
     decks.deck_from_tags(conn, "other")

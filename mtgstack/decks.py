@@ -77,6 +77,34 @@ def create_deck(conn, name: str, fmt: str = "", notes: str = "", slug: str | Non
     return slug
 
 
+def _rename(conn, slug: str, name: str) -> str:
+    """Rename a deck. Its cards are found by the tag `deck:<slug>`, and the slug comes from the name, so the tags
+    (every board), the list and the deck's address all move to the new slug. Returns it. Does not commit."""
+    name = " ".join(str(name).split())
+    if not 0 < len(name) <= 80:
+        raise ValueError("a deck needs a name (80 characters at most)")
+    new = slugify(name)
+    if new == slug:
+        conn.execute("UPDATE decks SET name=? WHERE slug=?", (name, slug))
+        return slug
+    if conn.execute("SELECT 1 FROM decks WHERE slug=?", (new,)).fetchone():
+        raise ValueError(f"you already have a deck named {name!r}: pick another name")
+    # entries reference the deck's slug: make the renamed deck first, move them over, then drop the old row
+    conn.execute("INSERT INTO decks(slug, name, format, notes, status, priority, created_at) "
+                 "SELECT ?, ?, format, notes, status, priority, created_at FROM decks WHERE slug=?", (new, name, slug))
+    conn.execute("UPDATE deck_entries SET deck_slug=? WHERE deck_slug=?", (new, slug))
+    conn.execute("DELETE FROM decks WHERE slug=?", (slug,))
+    tagged = conn.execute("SELECT lot_id, tag FROM lot_tags WHERE tag=? OR tag LIKE ?",
+                          (f"deck:{slug}", f"deck:{slug}:%")).fetchall()
+    for lot_id, tag in tagged:
+        conn.execute("DELETE FROM lot_tags WHERE lot_id=? AND tag=?", (lot_id, tag))
+        conn.execute("INSERT OR IGNORE INTO lot_tags VALUES (?,?)", (lot_id, f"deck:{new}" + tag[len(f"deck:{slug}"):]))
+    for lot_id in {t[0] for t in tagged}:
+        if conn.execute("SELECT 1 FROM lots WHERE id=?", (lot_id,)).fetchone():
+            col._merge_into_twin(conn, lot_id)
+    return new
+
+
 def update_deck(conn, slug: str, status: str | None = None, priority: int | None = None, name: str | None = None,
                 fmt: str | None = None, commit: bool = True) -> dict:
     if not conn.execute("SELECT 1 FROM decks WHERE slug=?", (slug,)).fetchone():
@@ -85,9 +113,11 @@ def update_deck(conn, slug: str, status: str | None = None, priority: int | None
         if status not in ("building", "built"):
             raise ValueError("status must be 'building' (in progress, auto-fill) or 'built'")
         conn.execute("UPDATE decks SET status=? WHERE slug=?", (status, slug))
-    for col_, val in (("priority", priority), ("name", name), ("format", fmt)):
+    for col_, val in (("priority", priority), ("format", fmt)):
         if val is not None:
             conn.execute(f"UPDATE decks SET {col_}=? WHERE slug=?", (val, slug))
+    if name is not None:
+        slug = _rename(conn, slug, name)
     log_event(conn, "deck_update", slug=slug, status=status, priority=priority)
     if commit:
         conn.commit()
@@ -119,28 +149,35 @@ def import_decklist(conn: sqlite3.Connection, catalog: Catalog, name: str, text:
     return {"slug": slug, "entries": len(parse_decklist(text)), "unresolved": unresolved}
 
 
-def deck_from_tags(conn, slug: str, name: str | None = None, keep: bool = False) -> str:
-    """Build the decklist from whatever is currently tagged into the deck (e.g. after scanning a deck).
-
-    `keep`: leave the list as it is and only grow it to cover the tagged cards: a card scanned into a deck that is
-    not on its list (always the case for a deck started empty) gets an entry, and a wanted count lower than the
-    copies now in the deck is raised. Nothing is removed and the deck's name and format are untouched."""
-    if not conn.execute("SELECT 1 FROM decks WHERE slug=?", (slug,)).fetchone() or not keep:
-        create_deck(conn, name or slug, slug=slug)
-    if not keep:
-        conn.execute("DELETE FROM deck_entries WHERE deck_slug=?", (slug,))
+def _cover(conn, slug: str, fresh: bool = False) -> None:
+    """Make the deck's list cover the cards tagged into it: a tagged card that is not on the list gets an entry,
+    and a wanted count lower than the copies now in the deck is raised. Nothing is removed. (`fresh`: the list was
+    just emptied, so every tagged card is new.) Does not commit."""
     for board in BOARDS:
         tagged = rows(conn.execute(
             "SELECT p.name, p.oracle_id, SUM(l.qty) q FROM lots l JOIN printings p ON p.id=l.printing_id "
             "JOIN lot_tags t ON t.lot_id=l.id WHERE t.tag=? GROUP BY p.oracle_id", (board_tag(slug, board),)))
         for r in tagged:
-            have = conn.execute("SELECT COALESCE(SUM(qty), 0), MIN(id) FROM deck_entries WHERE deck_slug=? AND board=? "
-                                "AND oracle_id=?", (slug, board, r["oracle_id"])).fetchone() if keep else (0, None)
+            have = (0, None) if fresh else conn.execute(
+                "SELECT COALESCE(SUM(qty), 0), MIN(id) FROM deck_entries WHERE deck_slug=? AND board=? AND oracle_id=?",
+                (slug, board, r["oracle_id"])).fetchone()
             if have[1] is None:
                 conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, qty) VALUES (?,?,?,?,?)",
                              (slug, board, r["name"], r["oracle_id"], r["q"]))
             elif have[0] < r["q"]:
                 conn.execute("UPDATE deck_entries SET qty = qty + ? WHERE id=?", (r["q"] - have[0], have[1]))
+
+
+def deck_from_tags(conn, slug: str, name: str | None = None, keep: bool = False) -> str:
+    """Build the decklist from whatever is currently tagged into the deck (e.g. after scanning a deck).
+
+    `keep`: leave the list as it is and only grow it to cover the tagged cards (see `_cover`). The deck's name and
+    format are untouched."""
+    if not conn.execute("SELECT 1 FROM decks WHERE slug=?", (slug,)).fetchone() or not keep:
+        create_deck(conn, name or slug, slug=slug)
+    if not keep:
+        conn.execute("DELETE FROM deck_entries WHERE deck_slug=?", (slug,))
+    _cover(conn, slug, fresh=not keep)
     conn.commit()
     return slug
 
@@ -302,6 +339,8 @@ def send(conn, lot_id: int, qty: int | None = None, deck: str | None = None, boa
         raise ValueError(f"board must be one of {BOARDS}")
     target = col.move(conn, lot_id, qty, add_tags=[board_tag(deck, board)] if deck else None,
                       remove_tags=["deck:*"], commit=False)
+    if deck:
+        _cover(conn, deck)          # a card put in a deck by hand belongs on its list, or the deck page hides it
     log_event(conn, "send", lot_id=lot_id, qty=qty, deck=deck, board=board, to_lot=target)
     if commit:
         conn.commit()

@@ -198,7 +198,8 @@ export default function Collection() {
           </div>
         )}
       </main>
-      {open && <CardDrawer printingId={open} ids={ids} onNavigate={setOpen} onClose={() => setOpen(null)} />}
+      {open && <CardDrawer printingId={open} ids={ids} onNavigate={setOpen} onClose={() => setOpen(null)}
+        preview={Object.fromEntries((data?.rows || []).map(r => [r.printing_id, { name: r.name, image: r.image_normal || r.image_small }]))} />}
     </div>
   );
 }

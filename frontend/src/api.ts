@@ -139,8 +139,9 @@ export const api = {
   createDeck: (b: { name: string; text: string; format: string; status: "building" | "built" }) =>
     post<{ slug: string; entries: number; unresolved: string[] }>("/api/decks", b),
   deck: (slug: string, q = "") => get<DeckDetail>(`/api/decks/${slug}?${qs({ q })}`),
+  /** renaming changes the deck's slug (its address and its `deck:` tag): use the one that comes back */
   patchDeck: (slug: string, b: Partial<{ status: string; priority: number; name: string; format: string }>) =>
-    req("PATCH", `/api/decks/${slug}`, b),
+    req<{ slug: string; name: string }>("PATCH", `/api/decks/${slug}`, b),
   deleteDeck: (slug: string) => req("DELETE", `/api/decks/${slug}`),
   /** grow a deck's list to cover the cards tagged into it (after scanning cards into the deck) */
   deckCover: (slug: string) => post<{ slug: string }>(`/api/decks/${slug}/from-tags?keep=true`),
