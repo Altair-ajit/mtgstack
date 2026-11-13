@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, lab } from "../api";
 import CardPicker from "../components/CardPicker";
 import { BatchRow, itemFor, itemPrice, sameCard, sameStack } from "../components/ScanBatch";
@@ -27,7 +27,20 @@ export default function Scan() {
   const overlay = useRef<HTMLCanvasElement>(null);
   const [sp, setSp] = useSearchParams();
   // Batch: scans pile up in an editable list and go into the collection together. Single: look a card up.
-  const mode: Mode = (sp.get("mode") || localStorage.getItem("mtg.scan.mode") || "batch") === "single" ? "single" : "batch";
+  // Scanning a deck in (from the Decks page): the batch becomes a new deck that owns the scanned cards.
+  const [newDeck, setNewDeckState] = useState<{ name: string; format: string } | null>(() => {
+    try { return JSON.parse(localStorage.getItem("mtg.scan.deck") || "null"); } catch { return null; }
+  });
+  const setNewDeck = (d: { name: string; format: string } | null) => {
+    if (d) localStorage.setItem("mtg.scan.deck", JSON.stringify(d)); else localStorage.removeItem("mtg.scan.deck");
+    setNewDeckState(d);
+  };
+  const nav = useNavigate();
+  useEffect(() => {
+    const name = sp.get("deck");
+    if (name) { setNewDeck({ name, format: sp.get("format") || "" }); setSp({ mode: "batch" }, { replace: true }); }
+  }, []); // eslint-disable-line
+  const mode: Mode = !newDeck && (sp.get("mode") || localStorage.getItem("mtg.scan.mode") || "batch") === "single" ? "single" : "batch";
   const setMode = (m: Mode) => { localStorage.setItem("mtg.scan.mode", m); setSp({ mode: m }, { replace: true }); setRes(null); };
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [trackOn, setTrackOn] = useState(true);
@@ -256,17 +269,21 @@ export default function Scan() {
   const commit = async () => {
     setSaving(true);
     try {
+      // status/set_code/number: a deck's list then records the exact printing and finish that was scanned
       const rows = items.map(i => ({ printing_id: i.printing_id, qty: i.qty, finish: i.finish, condition: i.condition,
-        language: i.language, tags: i.tags, include: true }));
-      const out = await api.importCommit(rows as unknown as ImportRow[], { type: "collection", tags: [] });
+        language: i.language, tags: newDeck ? i.tags.filter(t => !t.startsWith("deck:")) : i.tags, include: true,
+        status: "matched", set_code: i.set_code, number: i.number }));
+      const out = await api.importCommit(rows as unknown as ImportRow[], newDeck
+        ? { type: "deck", name: newDeck.name, format: newDeck.format, status: "built", owned: true } : { type: "collection", tags: [] });
       for (const i of items) {                     // what was kept or corrected teaches the Scanner Lab
         if (!i.scan_id || !i.orig) continue;
         const wrong = i.orig.printing_id !== i.printing_id || i.orig.finish !== i.finish;
         lab.label(i.scan_id, wrong ? { verdict: "wrong", printing_id: i.printing_id, finish: i.finish } : { verdict: "correct", finish: i.finish }).catch(() => {});
       }
       setItems([]); setRes(null); setAdded({ cards: out.cards, allocations: out.allocations || [] });
-      toast(`Added ${out.cards} card${out.cards === 1 ? "" : "s"} to your collection`);
+      toast(newDeck ? `Created ${newDeck.name} with ${out.cards} cards` : `Added ${out.cards} card${out.cards === 1 ? "" : "s"} to your collection`);
       qc.invalidateQueries();
+      if (out.deck) { setNewDeck(null); nav(`/decks/${out.deck}`); }
     } catch (e) { toast(String((e as Error).message), "err"); }
     setSaving(false);
   };
@@ -276,13 +293,13 @@ export default function Scan() {
     <div className="page">
       <main className="content wide scan">
         <div className="page-head">
-          <div><h1>Scan cards</h1><div className="muted">{mode === "batch"
+          <div><h1>{newDeck ? "Scan a deck in" : "Scan cards"}</h1><div className="muted">{newDeck ? "Scan the cards of the deck. They collect in a list you can correct, then become the deck." : mode === "batch"
             ? "Scan a pile: cards collect in a list you can correct, then add them all at once."
             : "Check a card's printing and price. Add it to your collection only if you want to."}</div></div>
-          <div className="seg" role="tablist">
+          {!newDeck && <div className="seg" role="tablist">
             <button role="tab" aria-selected={mode === "batch"} className={mode === "batch" ? "on" : ""} onClick={() => setMode("batch")}>Scan a batch</button>
             <button role="tab" aria-selected={mode === "single"} className={mode === "single" ? "on" : ""} onClick={() => setMode("single")}>Price check</button>
-          </div>
+          </div>}
         </div>
         <div className="scan-grid">
           <div>
@@ -306,18 +323,20 @@ export default function Scan() {
               <label>Condition <select value={condition} onChange={e => setCondition(e.target.value)}>
                 {Object.entries(COND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
             </div>
-            <TagBar active={tags} onChange={setTags} />
+            <TagBar active={tags} onChange={setTags} noDeck={!!newDeck} />
           </div>
 
           <div>
             {mode === "batch" && (
               <div className="batch">
+                {newDeck && <div className="batch-deck"><span>New deck <b>{newDeck.name}</b>{newDeck.format ? ` (${newDeck.format})` : ""}: the cards you scan go into your collection, in this deck.</span>
+                  <button className="link" onClick={() => setNewDeck(null)}>Scan to collection instead</button></div>}
                 <div className="batch-head">
                   <div className="batch-total"><b>{count}</b> card{count === 1 ? "" : "s"} · {items.length} unique · <b className="price">{money(value)}</b></div>
                   <div className="actions">
                     <button onClick={() => setByName(true)}>+ Add by name</button>
                     <button className="link danger" disabled={!items.length} onClick={() => confirm(`Discard the ${count} scanned cards?`) && setItems([])}>Clear</button>
-                    <button className="primary" disabled={!items.length || saving} onClick={commit}>{saving ? "Adding…" : `Add ${count || ""} to collection`}</button>
+                    <button className="primary" disabled={!items.length || saving} onClick={commit}>{saving ? "Adding…" : newDeck ? `Create deck (${count} cards)` : `Add ${count || ""} to collection`}</button>
                   </div>
                 </div>
                 {res && !res.printing_id && !busy && (

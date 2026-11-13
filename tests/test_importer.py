@@ -93,6 +93,19 @@ def test_commit_to_collection_with_tags_and_auto_allocation(conn, cat):
     assert sum(l["qty"] for l in query(conn, "tag:from-tcg")) == res["cards"]
     assert decks.reconcile(conn, "wip")["totals"]["progress"] == "1/1"
 
+def test_scanned_batch_becomes_an_owned_deck(conn, cat):
+    """The Scan page's "scan a deck in" sends bare rows: what was scanned, with its printing and finish."""
+    sol = pid(cat, "Sol Ring", "cmm")
+    rows = [{"printing_id": sol, "qty": 2, "finish": "foil", "condition": "LP", "language": "en", "tags": ["box:3"],
+             "include": True, "status": "matched", "set_code": "cmm", "number": "410"}]
+    res = importer.commit(conn, cat, rows, {"type": "deck", "name": "Scanned", "format": "commander", "status": "built", "owned": True})
+    rep = decks.reconcile(conn, res["deck"])
+    assert (res["cards"], rep["totals"]["wanted"], rep["totals"]["in_deck"]) == (2, 2, 2)
+    lot = query(conn, "deck:scanned sol")[0]
+    assert (lot["finish"], lot["condition"], lot["qty"]) == ("foil", "LP", 2) and "box:3" in lot["tags"]
+    assert rep["entries"][0]["card_printing_id"] == sol                # the list remembers the printing scanned
+
+
 def test_commit_as_owned_deck(conn, cat):
     p = importer.preview(conn, cat, TEXT, online=False)
     res = importer.commit(conn, cat, p["rows"], {"type": "deck", "name": "Burn", "format": "modern", "status": "built", "owned": True})

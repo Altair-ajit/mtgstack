@@ -256,6 +256,8 @@ table.cards.deck td.qtycol { width: 30px; font-weight: 700; } table.cards.deck t
 .batch-head { position: sticky; top: 60px; z-index: 5; display: flex; gap: 8px 16px; align-items: center; justify-content: space-between; flex-wrap: wrap;
   padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; }
 .batch-head .actions { margin: 0; } .batch-total { font-size: 15px; }
+.batch-deck { display: flex; gap: 6px 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 9px 14px; background: var(--blue-l); color: var(--blue-d); border-radius: 12px 12px 0 0; }
+.batch-deck + .batch-head { border-radius: 0; }
 .batch-empty { padding: 28px 16px; text-align: center; margin: 0; }
 .batch-miss, .batch-done { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 9px 14px; border-bottom: 1px solid var(--line2); }
 .batch-miss { background: #fff8e6; } .batch-miss .icon { margin-left: auto; } .batch-done { background: #dcf3e5; color: #0f6a3c; }
