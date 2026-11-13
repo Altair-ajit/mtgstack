@@ -407,3 +407,106 @@ button.big, .btn.big { font-size: 16px; padding: 10px 18px; }
   .logo { font-size: 16px; flex: none; }
 }
 .banner.crash { position: sticky; top: 0; z-index: 1001; background: #fde4e1; border-color: #f3b4ae; }
+
+
+/* ---- scanner controls (all sizes) ---- */
+.cam-bar { display: flex; gap: 8px; align-items: center; margin: 10px 0; }
+.only-phone, .tabbar { display: none; }
+.scan-opts .actions { margin: 10px 0; }
+
+/* ================= phones: an app, not a shrunken desktop page =================
+   Bottom tab bar, dialogs and filters as slide-up sheets, lists instead of tables, a camera-first scanner. */
+@media (max-width: 760px) {
+  .not-phone { display: none !important; }
+  .only-phone { display: inline-flex; }
+  div.only-phone { display: flex; } div.sheet-bg.only-phone { display: block; }
+  input, select, textarea { font-size: 16px; }                 /* smaller text makes iOS zoom the page on focus */
+  body { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+
+  /* shell */
+  .tabbar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: #fff; border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom); height: calc(60px + env(safe-area-inset-bottom)); box-sizing: border-box; box-shadow: 0 -2px 10px rgba(16,24,40,.06); }
+  .tabbar a { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 11px; font-weight: 600; color: var(--muted); }
+  .tabbar a:hover { text-decoration: none; } .tabbar a.active { color: var(--blue); }
+  .tabbar svg { width: 24px; height: 24px; }
+  .tabbar a.scan-tab svg { width: 30px; height: 30px; padding: 7px; margin-top: -16px; border-radius: 50%; background: var(--blue); color: #fff; box-shadow: 0 4px 12px rgba(31,111,235,.4); }
+  header.top { height: calc(50px + var(--safe-top)); } .top nav { display: none; }
+  .page { padding: 10px 12px 24px; }
+  .page-head { margin-bottom: 10px; align-items: center; flex-wrap: wrap; } .page-head h1 { font-size: 22px; margin: 0; }
+  .stats { gap: 12px; font-size: 13px; flex-wrap: wrap; }
+  .banner { padding: 8px 12px; }
+  .toasts { bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .boot-hint { bottom: calc(76px + env(safe-area-inset-bottom)); }
+
+  /* dialogs, the card drawer and option panels slide up from the bottom and scroll inside */
+  .sheet-bg { position: fixed; inset: 0; background: rgba(15,35,64,.4); z-index: 55; }
+  .modal, .modal.wide { left: 0; right: 0; top: auto; bottom: 0; transform: none; width: 100%; max-height: 92dvh; border-radius: 16px 16px 0 0; }
+  .modal-head { padding: 12px 16px; } .modal-head h2 { font-size: 18px; margin: 0; }
+  .modal-body { padding: 12px 16px; -webkit-overflow-scrolling: touch; }
+  .modal-foot { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-radius: 0; }
+  .modal-foot button.primary { flex: 1; justify-content: center; padding: 11px 12px; }
+  .drawer { width: 100vw; padding-top: var(--safe-top); }
+  .dest { grid-template-columns: 1fr; } .printing-grid { max-height: none; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); }
+  .sheet-head { justify-content: space-between; align-items: center; padding: 4px 0 10px; font-size: 17px; }
+  .sheet-foot { position: sticky; bottom: 0; background: #fff; padding: 10px 14px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .sheet-foot button { flex: 1; justify-content: center; padding: 11px; }
+
+  /* collection: filters in a sheet, one tidy row per card */
+  .sidebar, .sidebar.show { display: block; position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60; max-height: 82dvh; overflow: auto;
+    border-radius: 16px 16px 0 0; border: 0; transform: translateY(105%); transition: transform .22s ease; box-shadow: 0 -10px 40px rgba(0,0,0,.25); }
+  .sidebar.show { transform: none; }
+  .toolbar { gap: 8px; } .toolbar .search { flex-basis: 100%; } .toolbar .search input { padding: 10px 12px; }
+  .filters-btn { flex: 1; justify-content: center; } .sortsel { flex: 2; display: flex; align-items: center; gap: 6px; } .sortsel select { flex: 1; min-width: 0; }
+  .bulkbar { top: calc(50px + var(--safe-top)); }
+  table.cards:not(.deck), table.cards:not(.deck) tbody { display: block; }
+  table.cards:not(.deck) thead { display: none; }
+  table.cards:not(.deck) tr { display: grid; grid-template-columns: 22px 46px minmax(0, 1fr) auto; grid-template-areas: "cb thumb name price" "cb thumb name qty";
+    column-gap: 10px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line2); }
+  table.cards:not(.deck) td { padding: 0; border: 0; }
+  table.cards:not(.deck) td.cb { grid-area: cb; } table.cards:not(.deck) td.thumb { grid-area: thumb; width: auto; padding: 0 !important; }
+  table.cards:not(.deck) td.thumb .card-img { width: 46px; }
+  table.cards:not(.deck) td:nth-child(3) { grid-area: name; min-width: 0; }
+  table.cards:not(.deck) .cname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; } table.cards .sub { flex-wrap: wrap; row-gap: 2px; }
+  table.cards:not(.deck) td:nth-child(8) { grid-area: qty; text-align: right; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+  table.cards:not(.deck) td:nth-child(8)::before { content: "Qty "; }
+  table.cards:not(.deck) td:nth-child(9) { grid-area: price; text-align: right; font-weight: 700; font-size: 15px; }
+  .foot { justify-content: center; }
+
+  /* decks */
+  .deck-grid { grid-template-columns: 1fr; } .deck-hero .hint { display: none; } .big-progress b { font-size: 34px; }
+  .tabs.inline { overflow-x: auto; flex-wrap: nowrap; width: 100%; scrollbar-width: none; } .tabs.inline button { white-space: nowrap; padding: 8px 10px; }
+  table.cards.deck, table.cards.deck tbody { display: block; }
+  table.cards.deck tr { display: grid; grid-template-columns: 44px auto minmax(0, 1fr) auto; grid-template-areas: "thumb qty name price" "thumb qty status status" "act act act act";
+    column-gap: 8px; row-gap: 3px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line2); }
+  table.cards.deck td { padding: 0 !important; border: 0; width: auto !important; white-space: normal; }
+  table.cards.deck td:nth-child(1) { grid-area: thumb; } table.cards.deck td:nth-child(1) .card-img { width: 44px; }
+  table.cards.deck td:nth-child(2) { grid-area: qty; font-weight: 700; } table.cards.deck td:nth-child(3) { grid-area: name; min-width: 0; }
+  table.cards.deck td:nth-child(6) { grid-area: status; } table.cards.deck td:nth-child(7) { grid-area: price; font-weight: 700; }
+  table.cards.deck td:nth-child(8) { grid-area: act; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-start; text-align: left; }
+  table.cards.deck td:nth-child(8):empty { display: none; }
+
+  /* scanner: camera first, one big capture button, options in a sheet, the total and Add always in reach */
+  .scan .page-head > div:first-child .muted { display: none; } .scan .page-head { flex-wrap: nowrap; }
+  .scan .seg button { padding: 6px 10px; font-size: 13px; }
+  .scan .cam { height: 42dvh; border-radius: 14px; }
+  .cam-bar { display: grid; grid-template-columns: 1fr auto 1fr; margin: 10px 0 6px; }
+  .cam-bar .cam-side { justify-self: center; border-radius: 99px; padding: 9px 16px; }
+  .shutter { width: 68px; height: 68px; border-radius: 50%; border: 4px solid #fff; background: var(--blue); box-shadow: 0 0 0 3px var(--blue), 0 6px 16px rgba(31,111,235,.35); padding: 0; }
+  .shutter:disabled { background: #b9c3d1; box-shadow: 0 0 0 3px #b9c3d1; opacity: 1; }
+  .opts-summary { width: 100%; justify-content: center; border: 0; background: none; color: var(--muted); font-size: 13px; padding: 4px; white-space: normal; }
+  .scan-opts { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; background: #fff; border-radius: 16px 16px 0 0; padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+    max-height: 82dvh; overflow: auto; transform: translateY(105%); transition: transform .22s ease; box-shadow: 0 -10px 40px rgba(0,0,0,.25); }
+  .scan-opts.open { transform: none; }
+  .scan-opts .actions { flex-direction: column; align-items: stretch; gap: 12px; } .scan-opts .actions label { display: flex; align-items: center; gap: 10px; }
+  .scan-opts .actions select { flex: 1; } .scan-opts .actions button { justify-content: center; padding: 10px; }
+  .tagbar { gap: 8px; } .tag-toggle { padding: 7px 13px; font-size: 14px; } .tag-new { flex: 1; min-width: 150px; } .deck-pick { width: 100%; } .deck-pick select { flex: 1; }
+  .scan .hint { display: none; }
+  .batch { border-radius: 12px; margin-bottom: 84px; }
+  .batch-head { position: fixed; top: auto; left: 0; right: 0; bottom: calc(60px + env(safe-area-inset-bottom)); z-index: 35; border-radius: 0; border-top: 1px solid var(--line); border-bottom: 0;
+    box-shadow: 0 -4px 14px rgba(16,24,40,.08); padding: 8px 12px; flex-wrap: nowrap; gap: 8px; }
+  .batch-head .actions { flex-wrap: nowrap; gap: 4px; flex: 1; min-width: 0; justify-content: flex-end; } .batch-head .actions button { padding: 8px 9px; }
+  .batch-head .actions button.primary { padding: 9px 16px; } .batch-head .actions .spacer { display: none; } .batch-total { font-size: 14px; white-space: nowrap; }
+  .toolbar .seg button { padding: 8px 9px; font-size: 13px; } .sortsel { font-size: 0; } .sortsel select { font-size: 16px; }
+  .batch-deck { border-radius: 12px 12px 0 0; } .batch-deck + .batch-head { border-radius: 0; }
+  .stepper button { padding: 7px 11px; } .br-opts select { padding: 7px 4px; }
+}

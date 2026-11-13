@@ -114,6 +114,13 @@ export default function App() {
         <Route path="/lab/live" element={<LabLive />} />
         <Route path="*" element={<Collection />} />
       </Routes>
+      {/* phones: the main sections sit under the thumb, like a store app; hidden on wider screens (styles.css) */}
+      <nav className="tabbar" aria-label="Sections">
+        <NavLink to="/" end><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="3" width="12" height="16" rx="2" /><path d="M8 21h10a2 2 0 0 0 2-2V8" /></svg><span>Collection</span></NavLink>
+        <NavLink to="/decks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3 3 8l9 5 9-5-9-5Z" /><path d="m3 13 9 5 9-5" /></svg><span>Decks</span></NavLink>
+        <NavLink to="/scan" className={({ isActive }) => `scan-tab ${isActive ? "active" : ""}`}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2" /><circle cx="12" cy="12" r="3.2" /></svg><span>Scan</span></NavLink>
+        <NavLink to="/lab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4A2 2 0 0 0 19 18l-5-9V3" /><path d="M7.5 15h9" /></svg><span>Lab</span></NavLink>
+      </nav>
       {importing && <ImportDialog onClose={() => setImporting(false)} />}
       {adding && <AddCard onClose={() => setAdding(false)} />}
       {phone && <PhoneDialog onClose={() => setPhone(false)} />}

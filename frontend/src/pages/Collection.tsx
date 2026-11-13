@@ -74,7 +74,12 @@ export default function Collection() {
 
   return (
     <div className="page with-sidebar">
-      <aside className={`sidebar ${showFilters ? "show" : ""}`}><FilterPanel facets={data?.facets} filters={filters} onChange={setFilters} /></aside>
+      {showFilters && <div className="sheet-bg only-phone" onClick={() => setShowFilters(false)} />}
+      <aside className={`sidebar ${showFilters ? "show" : ""}`}>
+        <FilterPanel facets={data?.facets} filters={filters} onChange={setFilters} />
+        <div className="sheet-foot only-phone"><button className="primary" onClick={() => setShowFilters(false)}>
+          Show {data ? data.totals.cards.toLocaleString() : ""} cards</button></div>
+      </aside>
       <main className="content">
         <div className="page-head">
           <div>
@@ -95,7 +100,7 @@ export default function Collection() {
           <button className="filters-btn" onClick={() => setShowFilters(!showFilters)}>
             Filters{Object.values(filters).flat().filter(Boolean).length ? ` (${Object.values(filters).flat().filter(Boolean).length})` : ""}
           </button>
-          <Link className="btn" to="/scan?mode=batch" title="Scan a pile of cards with the camera, check the list, then add them all">📷 Scan cards in</Link>
+          <Link className="btn not-phone" to="/scan?mode=batch" title="Scan a pile of cards with the camera, check the list, then add them all">📷 Scan cards in</Link>
           <label className="sortsel">Sort <select value={sort} onChange={e => update({ sort: e.target.value })}>
             {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
           <div className="seg">
@@ -144,7 +149,7 @@ export default function Collection() {
                   <tr key={rowKey(r)} className={selected.has(rowKey(r)) ? "sel" : ""} onClick={() => setOpen(r.printing_id)}>
                     <td className="cb" onClick={e => e.stopPropagation()}><input type="checkbox" checked={selected.has(rowKey(r))} onChange={() => toggleSel(rowKey(r))} /></td>
                     <td className="thumb"><HoverCard small={r.image_small} large={r.image_normal} name={r.name} /></td>
-                    <td><div className="cname">{r.name}</div><div className="sub"><span className="setcode show-xs">{r.set_code.toUpperCase()}</span><span className="show-xs"><FinishBadge f={r.finish} /></span><Mana cost={r.mana_cost} /> <span className="muted hide-xs">{r.type_line}</span></div></td>
+                    <td><div className="cname">{r.name}</div><div className="sub"><span className="setcode show-xs">{r.set_code.toUpperCase()}</span><span className="show-xs"><FinishBadge f={r.finish} /></span><span className="show-xs muted">{r.condition}</span><Mana cost={r.mana_cost} /> <span className="muted hide-xs">{r.type_line}</span></div></td>
                     <td className="setcol hide-xs"><div className="ell"><span className="setcode">{r.set_code.toUpperCase()}</span> <span className="hide-md">{r.set_name}</span></div><div className="sub muted">#{r.collector_number}</div></td>
                     <td className="hide-sm"><Rarity r={r.rarity} /></td>
                     <td className="hide-xs">{r.finish === "nonfoil" ? <span className="muted">Normal</span> : <FinishBadge f={r.finish} />}{r.language !== "en" && <div className="sub muted">{LANG_LABEL[r.language] || r.language}</div>}</td>

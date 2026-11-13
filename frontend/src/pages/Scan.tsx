@@ -56,6 +56,7 @@ export default function Scan() {
   const [items, setItems] = useState<BatchItem[]>(loadBatch);
   const [fresh, setFresh] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [optsOpen, setOptsOpen] = useState(false);          // phones: the scan options live in a slide-up sheet
   const [added, setAdded] = useState<{ cards: number; allocations: Allocation[] } | null>(null);
   const [byName, setByName] = useState(false);
   const [namePick, setNamePick] = useState<{ printing_id: string; finish: Finish } | null>(null);
@@ -312,18 +313,25 @@ export default function Scan() {
               {stream && (busy || hint) && <div className={`cam-hint ${busy ? "busy" : ""}`}>{busy ? "Reading the card…" : hint}</div>}
               {!stream && <div className="cam-off"><button className="primary" onClick={start}>Start camera</button><div className="muted small">or upload a photo below</div></div>}
             </div>
-            <div className="actions">
-              <button disabled={!stream || busy} onClick={async () => send([await grab()])}>📷 Capture</button>
-              <button disabled={!stream || busy} onClick={burst} title="Captures 6 frames while you tilt the card: detects foil shimmer on older cards">Tilt burst (foil check)</button>
-              <label className="btn">Upload photo<input type="file" accept="image/*" capture="environment" multiple hidden onChange={e => e.target.files && send([...e.target.files])} /></label>
+            <div className="cam-bar">
+              <label className="btn cam-side">Upload<span className="not-phone">&nbsp;photo</span><input type="file" accept="image/*" capture="environment" multiple hidden onChange={e => e.target.files && send([...e.target.files])} /></label>
+              <button className="shutter" disabled={!stream || busy} aria-label="Capture" onClick={async () => send([await grab()])}><span className="not-phone">📷 Capture</span></button>
+              <button className="cam-side only-phone" onClick={() => setOptsOpen(true)}>Options</button>
             </div>
-            <div className="actions">
-              <label className="check"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Auto-capture when steady</label>
-              <label className="check"><input type="checkbox" checked={trackOn} onChange={e => setTrackOn(e.target.checked)} /> Outline the card</label>
-              <label>Condition <select value={condition} onChange={e => setCondition(e.target.value)}>
-                {Object.entries(COND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            <button className="opts-summary only-phone" onClick={() => setOptsOpen(true)}>
+              {auto ? "Auto-capture" : "Manual"} · {condition}{tags.length > 0 && ` · ${tags.map(t => t.replace(/^deck:/, "deck ")).join(", ")}`} ›</button>
+            {optsOpen && <div className="sheet-bg only-phone" onClick={() => setOptsOpen(false)} />}
+            <div className={`scan-opts ${optsOpen ? "open" : ""}`}>
+              <div className="sheet-head only-phone"><b>Scan options</b><button className="primary" onClick={() => setOptsOpen(false)}>Done</button></div>
+              <div className="actions">
+                <label className="check"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Auto-capture when steady</label>
+                <label className="check"><input type="checkbox" checked={trackOn} onChange={e => setTrackOn(e.target.checked)} /> Outline the card</label>
+                <label>Condition <select value={condition} onChange={e => setCondition(e.target.value)}>
+                  {Object.entries(COND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+                <button disabled={!stream || busy} onClick={() => { setOptsOpen(false); burst(); }} title="Captures 6 frames while you tilt the card: detects foil shimmer on older cards">Tilt burst (foil check)</button>
+              </div>
+              <TagBar active={tags} onChange={setTags} noDeck={!!newDeck} />
             </div>
-            <TagBar active={tags} onChange={setTags} noDeck={!!newDeck} />
           </div>
 
           <div>
@@ -332,11 +340,12 @@ export default function Scan() {
                 {newDeck && <div className="batch-deck"><span>New deck <b>{newDeck.name}</b>{newDeck.format ? ` (${newDeck.format})` : ""}: the cards you scan go into your collection, in this deck.</span>
                   <button className="link" onClick={() => setNewDeck(null)}>Scan to collection instead</button></div>}
                 <div className="batch-head">
-                  <div className="batch-total"><b>{count}</b> card{count === 1 ? "" : "s"} · {items.length} unique · <b className="price">{money(value)}</b></div>
+                  <div className="batch-total"><b>{count}</b> card{count === 1 ? "" : "s"}<span className="not-phone"> · {items.length} unique</span> · <b className="price">{money(value)}</b></div>
                   <div className="actions">
-                    <button onClick={() => setByName(true)}>+ Add by name</button>
+                    <button onClick={() => setByName(true)}>+ <span className="not-phone">Add&nbsp;</span>by name</button>
                     <button className="link danger" disabled={!items.length} onClick={() => confirm(`Discard the ${count} scanned cards?`) && setItems([])}>Clear</button>
-                    <button className="primary" disabled={!items.length || saving} onClick={commit}>{saving ? "Adding…" : newDeck ? `Create deck (${count} cards)` : `Add ${count || ""} to collection`}</button>
+                    <span className="spacer only-phone" />
+                    <button className="primary" disabled={!items.length || saving} onClick={commit}>{saving ? "Adding…" : newDeck ? <>Create deck ({count}<span className="not-phone">&nbsp;cards</span>)</> : <>Add {count || ""}<span className="not-phone">&nbsp;to collection</span></>}</button>
                   </div>
                 </div>
                 {res && !res.printing_id && !busy && (
