@@ -30,6 +30,44 @@ from dataclasses import asdict, dataclass, field
 from . import collection as col
 from .catalog import Catalog
 
+# ---------------------------------------------------------------------------------------- limits (untrusted input)
+# An import is text someone pasted or a file from anywhere, and the rows sent back to commit() come from the browser:
+# neither is trusted. Everything is bounded, and commit() re-checks every field instead of believing the preview.
+MAX_TEXT = 1_000_000        # characters in one import
+MAX_LINES = 5000
+MAX_LINE = 400              # characters in one line of a text list
+MAX_QTY = 9999              # copies on one line
+MAX_FIELD = 200             # a CSV name / set name
+_TAG = re.compile(r"[a-z0-9][a-z0-9:_.\-]{0,39}")
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def safe_tags(tags, limit: int = 12) -> list[str]:
+    """Normalized tags, or ValueError: letters, digits and : _ . - only, 40 characters, at most `limit`."""
+    out = col.norm_tags(tags if isinstance(tags, (list, tuple, set, str)) or tags is None else [])
+    bad = [t for t in out if not _TAG.fullmatch(t)]
+    if bad:
+        raise ValueError(f"tag {bad[0][:40]!r} is not allowed: use letters, digits and : _ . - (40 characters at most)")
+    if len(out) > limit:
+        raise ValueError(f"too many tags ({len(out)}): {limit} at most")
+    return out
+
+
+def _qty(raw: str) -> int:
+    """A count of copies from a list: 1..MAX_QTY, or ValueError (also for inf, nan and absurd lengths)."""
+    raw = (raw or "1").strip()
+    if len(raw) > 12:
+        raise ValueError(raw[:12])
+    try:
+        n = float(raw)
+    except ValueError:
+        raise ValueError(raw) from None
+    if n != n or n in (float("inf"), float("-inf")) or n != int(n) or not 1 <= n <= MAX_QTY:
+        raise ValueError(raw)
+    return int(n)
+
+
 # ------------------------------------------------------------------------------------------------- parsing
 
 HEADER_ALIASES = {
@@ -127,6 +165,14 @@ def detect(text: str, filename: str | None = None) -> str:
 
 
 def parse(text: str, filename: str | None = None) -> tuple[str, list[Row], list[str]]:
+    if not isinstance(text, str):
+        raise ValueError("the list must be text")
+    if len(text) > MAX_TEXT:
+        raise ValueError(f"the list is too long ({len(text):,} characters): {MAX_TEXT:,} at most")
+    text = _CONTROL.sub("", text)
+    if text.count("\n") + 1 > MAX_LINES:
+        raise ValueError(f"the list has too many lines: {MAX_LINES:,} at most. Import it in parts.")
+    filename = (filename or "")[:200] if isinstance(filename, str) else None
     kind = detect(text, filename)
     return (kind, *(_parse_csv(text) if kind == "csv" else _parse_text(text)))
 
@@ -138,6 +184,10 @@ def _parse_csv(text: str) -> tuple[list[Row], list[str]]:
     except csv.Error:
         dialect = csv.excel
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    try:
+        records = list(reader)                     # a field over the csv module's size limit, a stray NUL...
+    except csv.Error as e:
+        return [], [f"this is not a CSV file that can be read: {e}"]
     norm = {(h or "").strip().lower(): h for h in (reader.fieldnames or [])}
     hm = {}
     for key, names in HEADER_ALIASES.items():
@@ -148,15 +198,18 @@ def _parse_csv(text: str) -> tuple[list[Row], list[str]]:
     if "name" not in hm and "product_id" not in hm and "scryfall_id" not in hm:
         return [], [f"no card name / product id / Scryfall id column in: {', '.join(reader.fieldnames or [])}"]
     rows, errors = [], []
-    for i, rec in enumerate(reader, start=2):
+    for i, rec in enumerate(records, start=2):
         g = lambda k: (rec.get(hm[k]) or "").strip() if k in hm else ""
         if not any((v or "").strip() for v in rec.values() if isinstance(v, str)):
             continue
-        r = Row(line=i, raw=",".join((v or "") for v in rec.values() if isinstance(v, str)))
+        r = Row(line=i, raw=",".join((v or "") for v in rec.values() if isinstance(v, str))[:300])
         try:
-            r.qty = max(1, int(float(g("qty") or 1)))
+            r.qty = _qty(g("qty"))
         except ValueError:
-            errors.append(f"line {i}: bad quantity {g('qty')!r}")
+            errors.append(f"line {i}: bad quantity {g('qty')[:20]!r} (a whole number from 1 to {MAX_QTY})")
+            continue
+        if len(g("name")) > MAX_FIELD or len(g("set_name")) > MAX_FIELD:
+            errors.append(f"line {i}: the name or set is too long to be a card")
             continue
         r.name = _clean_name(g("name")) if g("name") else None
         r.set_code = g("set_code").lower() or None
@@ -172,15 +225,17 @@ def _parse_csv(text: str) -> tuple[list[Row], list[str]]:
             "foil" if "printing" not in hm and _finish_from(g("name")) == "foil" else None)
         r.condition = col.norm_condition(cond)
         lang = g("language").lower()
-        r.language = LANG_NAMES.get(lang, lang[:3] if lang else "en")
+        r.language = LANG_NAMES.get(lang, lang if re.fullmatch(r"[a-z]{2,3}", lang) else "en")
         if g("product_id").isdigit():
             r.product_id = int(g("product_id"))
-        r.sku = g("sku") or None
-        r.scryfall_id = g("scryfall_id") or None
+        r.sku = g("sku")[:40] or None
+        r.scryfall_id = g("scryfall_id").lower() if _UUID.fullmatch(g("scryfall_id").lower()) else None
         p = g("price").replace("$", "").replace(",", "")
         r.price = float(p) if re.fullmatch(r"\d+(\.\d+)?", p) else None
         if g("tags"):
-            r.tags = col.norm_tags(re.sub(r"\s+", "-", t.strip()) for t in re.split(r"[,;|]", g("tags")) if t.strip())
+            # tags from a file are a convenience: the ones that are not plain tag text are dropped, not trusted
+            r.tags = [t for t in col.norm_tags(re.sub(r"\s+", "-", t.strip()) for t in re.split(r"[,;|]", g("tags")) if t.strip())
+                      if _TAG.fullmatch(t)][:12]
         rows.append(r)
     return rows, errors
 
@@ -193,12 +248,20 @@ def _parse_text(text: str) -> tuple[list[Row], list[str]]:
             continue
         if re.match(r"^(about|name)\b", line, re.I) and not re.match(r"^\d", line):
             continue
+        if len(line) > MAX_LINE:
+            errors.append(f"line {i}: too long to be a card ({len(line)} characters)")
+            continue
         line = re.sub(r"^SB:\s*", "", line)
         m = _TEXT_LINE.match(line)
         if not m or not m.group("name"):
-            errors.append(f"line {i}: couldn't read {raw!r}")
+            errors.append(f"line {i}: couldn't read {raw[:80]!r}")
             continue
-        r = Row(line=i, raw=raw, qty=int(m.group("qty") or 1))
+        try:
+            qty = _qty(m.group("qty") or "1")
+        except ValueError:
+            errors.append(f"line {i}: bad quantity {(m.group('qty') or '')[:20]!r} (a whole number from 1 to {MAX_QTY})")
+            continue
+        r = Row(line=i, raw=raw[:300], qty=qty)
         name = m.group("name").strip()
         marks = m.group("marks") or ""
         # "Card Name - Foil" style suffix
@@ -326,6 +389,7 @@ def _fetch_missing(conn, catalog: Catalog, rows: list[Row]) -> None:
             ids.append({"name": r.name, "set": r.set_code})
         elif r.name:
             ids.append({"name": r.name})
+    ids = ids[:1500]            # what is asked of Scryfall for one import is bounded, whatever was pasted
     try:
         cards = catalog.lookup_batch(ids)
         # name-only hits: pull every printing so set names / numbers can match next pass
@@ -344,46 +408,104 @@ def preview(conn, catalog: Catalog, text: str, filename: str | None = None, onli
     resolve(conn, catalog, rows, online)
     counts = {s: sum(1 for r in rows if r.status == s) for s in ("matched", "guessed", "unmatched")}
     cards = {s: sum(r.qty for r in rows if r.status == s) for s in ("matched", "guessed", "unmatched")}
-    value = round(sum((r.match or {}).get("price") or 0 for r in rows for _ in range(r.qty)), 2)
+    value = round(sum(((r.match or {}).get("price") or 0) * r.qty for r in rows), 2)
     return {"format": kind, "rows": [asdict(r) for r in rows], "errors": errors, "counts": counts, "cards": cards,
             "value": value}
 
 
 # --------------------------------------------------------------------------------------------- committing
 
+def _checked(conn, rows, dest) -> list[dict]:
+    """The rows to import, every field re-validated (they come back from the browser), or ValueError.
+
+    An import is all or nothing: a row that is not a card (never matched, or naming a printing that does not exist)
+    fails the whole import unless it was explicitly left out in the review (`include: false`)."""
+    if not isinstance(rows, list) or not isinstance(dest, dict):
+        raise ValueError("malformed import")
+    if len(rows) > MAX_LINES:
+        raise ValueError(f"too many rows ({len(rows):,}): {MAX_LINES:,} at most. Import it in parts.")
+    from .decks import BOARDS
+    out, bad = [], []
+    for r in rows:
+        if not isinstance(r, dict):
+            raise ValueError("malformed import row")
+        if r.get("include") is False:
+            continue
+        pid = r.get("printing_id")
+        label = str(r.get("name") or r.get("raw") or "?").strip()[:40]
+        if r.get("status") == "unmatched" or not isinstance(pid, str) or not 0 < len(pid) <= 64 \
+                or not conn.execute("SELECT 1 FROM printings WHERE id=?", (pid,)).fetchone():
+            bad.append(label)
+            continue
+        qty = r.get("qty")
+        if isinstance(qty, bool) or not isinstance(qty, int) or not 1 <= qty <= MAX_QTY:
+            raise ValueError(f"{label}: the quantity must be a whole number from 1 to {MAX_QTY}")
+        match = r.get("match") if isinstance(r.get("match"), dict) else {}
+        finish = match.get("finish") or r.get("finish")
+        price = r.get("price")
+        if isinstance(price, bool) or not isinstance(price, (int, float)) or price != price or not 0 <= price <= 1_000_000:
+            price = None
+        lang = r.get("language")
+        board = r.get("board")
+        out.append({
+            "printing_id": pid, "qty": qty,
+            "finish": col.norm_finish(finish if isinstance(finish, str) else None),
+            "wants_finish": r.get("finish") if r.get("finish") in ("nonfoil", "foil", "etched") else None,
+            "condition": col.norm_condition(r.get("condition") if isinstance(r.get("condition"), str) else None),
+            "language": lang if isinstance(lang, str) and re.fullmatch(r"[a-z]{2,3}", lang) else "en",
+            "tags": safe_tags(r.get("tags")), "price": price,
+            "board": board if board in BOARDS else "main",
+            "exact": r.get("status") == "matched" and bool(r.get("set_code") or r.get("number") or r.get("product_id")
+                                                           or r.get("scryfall_id")),
+        })
+    if bad:
+        more = f" and {len(bad) - 5} more" if len(bad) > 5 else ""
+        raise ValueError(f"{len(bad)} line{'s are not cards' if len(bad) > 1 else ' is not a card'}, so nothing was imported: "
+                         f"{', '.join(bad[:5])}{more}. Fix or remove them and import again.")
+    return out
+
+
 def commit(conn, catalog: Catalog, rows: list[dict], dest: dict) -> dict:
     """dest = {"type": "collection", "tags": [...]}
            | {"type": "deck", "name": str, "format": str, "status": "building"|"built", "owned": bool}
-    Rows without a printing_id are skipped. Returns counts + any in-progress deck allocations."""
+    All or nothing: every row must be a real card (see `_checked`), and a failure part-way leaves nothing behind.
+    Returns counts + any in-progress deck allocations."""
     from . import decks
-    rows = [r for r in rows if r.get("printing_id") and r.get("include", True)]
+    rows = _checked(conn, rows, dest)
     allocations: list = []
     added = 0
-    if dest.get("type") == "deck":
-        slug = decks.create_deck(conn, dest.get("name") or "Imported deck", dest.get("format", ""),
-                                 status=dest.get("status") or "building")
-        conn.execute("DELETE FROM deck_entries WHERE deck_slug=?", (slug,))
+    try:
+        if dest.get("type") == "deck":
+            name = _CONTROL.sub("", dest.get("name") if isinstance(dest.get("name"), str) else "").strip()
+            if not 0 < len(name) <= 80:
+                raise ValueError("a deck needs a name (80 characters at most)")
+            fmt = dest.get("format") if isinstance(dest.get("format"), str) else ""
+            if not re.fullmatch(r"[A-Za-z0-9 \-]{0,30}", fmt):
+                raise ValueError("unknown deck format")
+            if conn.execute("SELECT 1 FROM decks WHERE slug=?", (decks.slugify(name),)).fetchone():
+                raise ValueError(f"you already have a deck named {name!r}: pick another name")
+            status = dest.get("status") if dest.get("status") in ("building", "built") else "building"
+            slug = decks.create_deck(conn, name, fmt, status=status)
+            for r in rows:
+                p = catalog.get(r["printing_id"])
+                conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, printing_id, finish, qty) "
+                             "VALUES (?,?,?,?,?,?,?)", (slug, r["board"], p["name"], p["oracle_id"],
+                                                         p["id"] if r["exact"] else None,
+                                                         r["wants_finish"] if r["exact"] else None, r["qty"]))
+                if dest.get("owned"):
+                    col.add(conn, p["id"], r["qty"], r["finish"], r["condition"], r["language"],
+                            [decks.board_tag(slug, r["board"])] + r["tags"], r["price"],
+                            commit=False, auto_allocate=False)
+                added += r["qty"]
+            conn.commit()
+            return {"deck": slug, "cards": added, "rows": len(rows), "allocations": []}
+        tags = safe_tags(dest.get("tags"))
         for r in rows:
-            p = catalog.get(r["printing_id"])
-            exact = r.get("status") == "matched" and (r.get("set_code") or r.get("number") or r.get("product_id")
-                                                       or r.get("scryfall_id"))
-            board = r.get("board") or "main"
-            conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, printing_id, finish, qty) "
-                         "VALUES (?,?,?,?,?,?,?)", (slug, board, p["name"], p["oracle_id"], p["id"] if exact else None,
-                                                     r.get("finish") if exact else None, r["qty"]))
-            if dest.get("owned"):
-                col.add(conn, p["id"], r["qty"], (r.get("match") or {}).get("finish") or r.get("finish") or "nonfoil",
-                        r.get("condition") or "NM", r.get("language") or "en",
-                        [decks.board_tag(slug, board)] + list(r.get("tags") or []), r.get("price"),
-                        commit=False, auto_allocate=False)
+            col.add(conn, r["printing_id"], r["qty"], r["finish"], r["condition"], r["language"],
+                    tags + r["tags"], r["price"], commit=False, allocations=allocations)
             added += r["qty"]
         conn.commit()
-        return {"deck": slug, "cards": added, "rows": len(rows), "allocations": []}
-    tags = col.norm_tags(dest.get("tags"))
-    for r in rows:
-        fin = (r.get("match") or {}).get("finish") or r.get("finish") or "nonfoil"
-        col.add(conn, r["printing_id"], r["qty"], fin, r.get("condition") or "NM", r.get("language") or "en",
-                tags + list(r.get("tags") or []), r.get("price"), commit=False, allocations=allocations)
-        added += r["qty"]
-    conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return {"cards": added, "rows": len(rows), "allocations": allocations}

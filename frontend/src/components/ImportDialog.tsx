@@ -43,7 +43,7 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
     try {
       const p = await api.importPreview(input, tab === "file" ? file?.name : undefined);
       setPreview(p);
-      setRows(p.rows.map(r => ({ ...r, include: r.status !== "unmatched" })));
+      setRows(p.rows.map(r => ({ ...r, include: true })));       // every line counts: one that is not a card blocks the import
       setShow(p.counts.guessed + p.counts.unmatched ? (p.counts.guessed ? "guessed" : "unmatched") : "all");
       setPg(0);
       if (!deck.name && tab === "file" && file) setDeck(d => ({ ...d, name: file.name.replace(/\.(csv|txt)$/i, "") }));
@@ -52,8 +52,12 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
   };
 
   const patch = (i: number, p: Partial<ImportRow>) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...p } : r)));
-  const included = rows.filter(r => r.include && r.printing_id);
-  const nCards = included.reduce((n, r) => n + r.qty, 0);
+  const included = rows.filter(r => r.include);
+  // An import is all or nothing. Lines that could not be read at all can only be fixed in the list (Back); a row that
+  // is not a card must be pointed at the right card or unticked. The server enforces the same rule.
+  const notCards = included.filter(r => !r.printing_id).length;
+  const blocked = notCards > 0 || (preview?.errors.length || 0) > 0;
+  const nCards = included.reduce((n, r) => n + (r.printing_id ? r.qty : 0), 0);
   const value = included.reduce((n, r) => n + (r.match?.price || 0) * r.qty, 0);
   const visible = useMemo(() => rows.map((r, i) => [r, i] as const).filter(([r]) => show === "all" || r.status === show), [rows, show]);
   const PAGE = 100;
@@ -152,7 +156,7 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
     <Modal title="Review import" onClose={onClose} wide footer={<>
       <button onClick={() => setPreview(null)}>‹ Back</button>
       <span className="muted">{nCards} cards · {money(value)}</span>
-      <button className="primary" disabled={!nCards || busy} onClick={commit}>
+      <button className="primary" disabled={!nCards || busy || blocked} onClick={commit}>
         {busy ? "Importing…" : dest === "deck" ? `Create deck (${nCards} cards)` : `Add ${nCards} cards to collection`}
       </button>
     </>}>
@@ -165,13 +169,21 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
           <button className={show === "unmatched" ? "on bad" : "bad"} onClick={() => { setShow("unmatched"); setPg(0); }}>✕ Not found {rows.filter(r => r.status === "unmatched").length}</button>
         </div>
       </div>
-      {preview.errors.length > 0 && <div className="error-box small">{preview.errors.slice(0, 5).join(" · ")}{preview.errors.length > 5 && ` · +${preview.errors.length - 5} more`}</div>}
+      {blocked && (
+        <div className="error-box">
+          <b>Nothing can be imported yet.</b>
+          {preview.errors.length > 0 && <div className="small">{preview.errors.length} line{preview.errors.length === 1 ? "" : "s"} could not be read
+            ({preview.errors.slice(0, 4).join(" · ")}{preview.errors.length > 4 && ` · +${preview.errors.length - 4} more`}). Go back and fix or delete {preview.errors.length === 1 ? "it" : "them"}.</div>}
+          {notCards > 0 && <div className="small">{notCards} line{notCards === 1 ? " is not a card" : "s are not cards"}. For each one, search the right card or untick it to leave it out.
+            {show !== "unmatched" && <button className="link" onClick={() => { setShow("unmatched"); setPg(0); }}>Show {notCards === 1 ? "it" : "them"}</button>}</div>}
+        </div>
+      )}
       <table className="mini import">
         <thead><tr><th></th><th></th><th>Qty</th><th>Card</th><th>Printing</th><th>Finish</th><th>Cond.</th><th className="num">Price</th></tr></thead>
         <tbody>
           {visible.slice(pg * PAGE, pg * PAGE + PAGE).map(([r, i]) => (
             <tr key={i} className={`st-${r.status} ${r.include ? "" : "off"}`}>
-              <td><input type="checkbox" checked={!!r.include} disabled={!r.printing_id} onChange={e => patch(i, { include: e.target.checked })} /></td>
+              <td><input type="checkbox" checked={!!r.include} onChange={e => patch(i, { include: e.target.checked })} /></td>
               <td className="st">{r.status === "matched" ? "✓" : r.status === "guessed" ? "?" : "✕"}</td>
               <td><input className="qty" type="number" min={1} value={r.qty} onChange={e => patch(i, { qty: Math.max(1, +e.target.value) })} /></td>
               <td>

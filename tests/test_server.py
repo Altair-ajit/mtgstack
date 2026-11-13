@@ -91,6 +91,12 @@ def test_browse_import_and_lot_endpoints(tmp_path):
     assert (made["name"], made["status"], made["wanted"]) == ("Brew In Progress", "building", 0)
     assert c.get("/api/decks/brew-in-progress").json()["entries"] == []
     c.delete("/api/decks/brew-in-progress")
+    # an import with a line that is not a card is refused as a whole, with a reason (400, not a crash)
+    junk = c.post("/api/import/preview", json={"text": "1 Sol Ring [CMM]\n1 zzzz qqqq"}).json()
+    r = c.post("/api/import/commit", json={"rows": junk["rows"], "dest": {"type": "collection", "tags": []}})
+    assert r.status_code == 400 and "not a card" in r.json()["detail"]
+    assert c.get("/api/cards").json()["totals"]["cards"] == 3                 # nothing was added
+    assert c.post("/api/import/preview", json={"text": "x" * 1_100_000}).status_code == 400
     c.post("/api/decks", json={"name": "Deck A", "text": "1 Counterspell"})
     assert c.post("/api/lots/bulk", json={"lot_ids": [lot], "action": "send", "deck": "deck-a"}).status_code == 200
     assert c.get("/api/cards", params={"deck": "deck-a"}).json()["totals"]["cards"] == 1

@@ -14,9 +14,13 @@ export const engineEvents: string[] = [];
 type Reply = { status: number; headers: [string, string][]; body: ArrayBuffer };
 type Pending = { ok: (r: Reply) => void; timer: number };
 
+/** Messages from the engine can quote file names or errors: never let them be read as markup. */
+const esc = (s: string) => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+
 function show(msg: string, err = false) {
   const el = document.getElementById("boot");
   if (!el) return;
+  msg = esc(msg);
   el.innerHTML = `<div class="boot-card"><div class="logo">mtg<b>stack</b></div>
     ${err ? "" : '<div class="spin"></div>'}<div class="${err ? "bad" : "muted"}">${msg}</div>
     ${err ? '<button onclick="location.reload()">Try again</button>' : ""}</div>`;
@@ -157,7 +161,7 @@ function apiImages() {
 function crashed(msg: string) {
   const el = document.createElement("div");
   el.className = "banner crash";
-  el.innerHTML = `<span>The app's engine stopped (${msg}). Your data is saved.</span>`;
+  el.innerHTML = `<span>The app's engine stopped (${esc(msg)}). Your data is saved.</span>`;
   const b = Object.assign(document.createElement("button"), { className: "primary", textContent: "Reload" });
   b.onclick = () => location.reload();
   el.appendChild(b);
