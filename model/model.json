@@ -1,0 +1,23 @@
+{
+ "model_version": "v1-e30",
+ "backbone": "mobilenetv3_large_100",
+ "dim": 128,
+ "input": {
+  "name": "image",
+  "shape": [
+   1,
+   3,
+   312,
+   224
+  ],
+  "format": "RGB float32 0..1, NCHW"
+ },
+ "metrics": {
+  "epoch": 29,
+  "pair": 0.0004,
+  "cls": 0.0192,
+  "top1_seen": 99.98,
+  "top1_held": 99.91,
+  "minutes": 3.3
+ }
+}

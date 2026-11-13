@@ -144,15 +144,17 @@ labels: each match was checked by eye against the matched reference image. 76 ph
   as the desktop app on 7 real photos (incl. 3 that need an alternative outline); model load 0.5 s from cache,
   ~0.1 s per crop (~1 s when all 11 alternatives are tried); a whole scan is 2-10 s, most of it detection and
   Tesseract in WebAssembly, as before. The float16-weights ONNX file loads fine in onnxruntime-web 1.31.
-- Publishing: the Pages workflow downloads the assets of a GitHub release tagged `model` (if there is one) and
-  passes `--model` to `build_pages.py`. Upload a new model with
-  `gh release create model ~/mtg-data/runs/v1/model/embed*` (or `gh release upload model ... --clobber`).
+- Publishing: the model is committed in `model/` (27 MB: `embedder.onnx`, `embeddings.bin`,
+  `embeddings-ids.json`, plus `model.json` / `report.json`). The Pages workflow passes `--model model` to
+  `build_pages.py`, and `run.sh` points `MTGSTACK_MODEL` at it when nothing else is set (the desktop app also
+  needs `pip install -e ".[model]"` for onnxruntime). To ship a new model: copy `~/mtg-data/runs/<name>/model/*`
+  over `model/` and commit. Each replacement adds ~27 MB to the repository's history for good, so do it for real
+  improvements only; if that gets heavy, move the files to a release or Git LFS.
 
-Not done: the `model` release itself (so the live phone app does not have the model yet), a check on a real
-phone (speed, memory; iOS Safari), Lab re-run with the model on the phone (re-run there is OCR only), Lab photos
-from this user's own phone (`scan-data/` is empty; `eval_lab.py` is ready for them), embedding new printings in
-the daily Action (new cards are unknown to the index until the model release is rebuilt), a "this is a card back"
-answer, telling same-art old printings apart.
+Not done: a check on a real phone (speed, memory; iOS Safari), Lab re-run with the model on the phone (re-run
+there is OCR only), Lab photos from this user's own phone (`scan-data/` is empty; `eval_lab.py` is ready for
+them), embedding new printings in the daily Action (new cards are unknown to the index until `model/` is
+rebuilt), a "this is a card back" answer, telling same-art old printings apart.
 
 ## Environment notes
 - Dev happens in WSL (Ubuntu) on Windows; repo at `/mnt/c/Users/Rajit/Desktop/Projects/mtgstack`.

@@ -3,3 +3,4 @@
 *.png binary
 *.jpg binary
 *.y4m binary
+model/* -text

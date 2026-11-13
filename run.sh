@@ -38,6 +38,8 @@ if [ "$TEST" = 1 ]; then exec .venv/bin/python -m pytest -q; fi
 
 # Scanner Lab dataset lives in the repo folder (gitignored) so it's easy to find and share.
 export MTGSTACK_SCANS="${MTGSTACK_SCANS:-$PWD/scan-data}"
+# Card-recognition model shipped in the repo (used when onnxruntime is installed: pip install -e ".[model]").
+[ -z "${MTGSTACK_MODEL:-}" ] && [ -f "$PWD/model/embedder.onnx" ] && export MTGSTACK_MODEL="$PWD/model"
 
 # --- Start ----------------------------------------------------------------------------------------
 ARGS=(-m mtgstack.cli serve --port "$PORT")

@@ -47,19 +47,11 @@ jobs:
           path: ~/.cache/mtgstack-pyodide
           key: pyodide-0.29.5
 
-      # The card-recognition model is trained locally (docs/scanner-model-plan.md) and published as the assets of
-      # a release tagged "model". No such release: the app is built without it and the scanner reads the text only.
-      - name: Fetch the card-recognition model
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p model-dist
-          gh release download model --dir model-dist --pattern 'embed*' || echo "no model release; building without it"
-
+      # The card-recognition model is trained locally (docs/scanner-model-plan.md) and committed in model/.
       - name: Build the app
         run: |
           MODEL=""
-          if [ -f model-dist/embedder.onnx ]; then MODEL="--model model-dist"; fi
+          if [ -f model/embedder.onnx ]; then MODEL="--model model"; fi
           python scripts/build_pages.py --out site --base "/${{ github.event.repository.name }}/" $MODEL
 
       - name: Build the card database (Scryfall bulk data + Card Kingdom prices)

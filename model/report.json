@@ -1,0 +1,10 @@
+{
+ "model": "embedder.onnx",
+ "model_version": "v1-e30",
+ "index_rows": 111678,
+ "top1_seen": 99.95,
+ "sim_right_seen": 0.937,
+ "sim_wrong_seen": 0.649,
+ "top1_held": 100.0,
+ "sim_right_held": 0.934
+}
