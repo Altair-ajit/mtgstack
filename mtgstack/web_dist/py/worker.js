@@ -20,7 +20,7 @@ let py, B, handle;
 let queue = Promise.resolve();                 // one request at a time (single SQLite connection)
 let saving = Promise.resolve();
 const job = { state: "idle", bytes: 0, total: 0, cards: 0, error: null };
-let remoteCatalog = null;
+let remoteCatalog = null, remoteTried = 0;
 
 // ---- persistence -----------------------------------------------------------------------------------------------
 function syncfs(populate) {
@@ -102,8 +102,9 @@ async function modelFile(cache, name, version) {
 function loadModel() {
   if (modelLoading) return modelLoading;
   modelLoading = (async () => {
-    // no Cache Storage in some app web views: the files are part of the app there, so nothing needs caching
-    const cache = self.caches ? await caches.open(MODEL_CACHE).catch(() => null) : null;
+    // Cache Storage only stores http(s) addresses ("Request url is not HTTP/HTTPS" otherwise). An installed app
+    // serves itself from capacitor://, where the model files are part of the app and need no caching anyway.
+    const cache = self.caches && /^https?:$/.test(self.location.protocol) ? await caches.open(MODEL_CACHE).catch(() => null) : null;
     const metaUrl = `${BASE}data/model/model.json`;
     let meta;
     try {
@@ -320,6 +321,7 @@ async function setupCatalogStorage() {
 
 // ---- card database ------------------------------------------------------------------------------------------------
 async function fetchRemoteCatalog() {
+  remoteTried = Date.now();
   try {
     const r = await fetch(`${DATA}catalog.json`, { cache: "no-store" });
     remoteCatalog = r.ok ? await r.json() : null;
@@ -425,6 +427,8 @@ async function api({ method, url, headers, body }) {
     const s = JSON.parse(new TextDecoder().decode(res.body));
     s.job = job;
     s.local_version = await enqueue(() => B.catalog_version());
+    // not known yet (still being asked at start-up, or the device was offline): ask again, at most once a minute
+    if (!remoteCatalog && Date.now() - remoteTried > 60000) fetchRemoteCatalog();
     s.remote = remoteCatalog;
     s.update_available = !!(remoteCatalog && remoteCatalog.version !== s.local_version);
     return json(200, s);

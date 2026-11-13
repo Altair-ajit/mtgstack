@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { NavLink, Route, Routes } from "react-router-dom";
 import { api } from "./api";
-import { LOCAL } from "./local/boot";
+import { LOCAL, NATIVE } from "./local/boot";
 import Collection from "./pages/Collection";
 import Decks from "./pages/Decks";
 import DeckDetail from "./pages/DeckDetail";
@@ -19,11 +19,21 @@ function CatalogBanner() {
   const qc = useQueryClient();
   const status = useQuery({
     queryKey: ["catalog-status"], queryFn: api.catalogStatus,
-    refetchInterval: q => (q.state.data?.job.state === "running" ? 1000 : false),
+    // the app looks again while it does not yet know what the site offers (just started, or offline)
+    refetchInterval: q => (q.state.data?.job.state === "running" ? 1000 : NATIVE && !q.state.data?.remote ? 15000 : false),
   });
   const s = status.data;
   const state = s?.job.state;
   useEffect(() => { if (state === "done") qc.invalidateQueries(); }, [state, qc]);
+  // The installed app keeps its card database current by itself: once per start, when it has none or the site has
+  // a newer one. The old one stays in use until the new one is complete, and when offline nothing changes.
+  const auto = useRef(false);
+  const wanted = NATIVE && !!s && state === "idle" && !!s.remote && (s.printings < 20000 || !!s.update_available);
+  useEffect(() => {
+    if (!wanted || auto.current) return;
+    auto.current = true;
+    api.syncCatalog().then(() => status.refetch()).catch(() => {});
+  }, [wanted]); // eslint-disable-line
   if (!s) return null;
   const job = s.job;
   if (job.state === "running") {

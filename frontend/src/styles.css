@@ -55,7 +55,7 @@ button.icon.light { color: #c9d6ea; }
 .section-h { margin: 24px 0 12px; font-size: 15px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
 
 /* filters */
-.sidebar { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
+.sidebar { position: sticky; top: calc(76px + var(--safe-top)); max-height: calc(100vh - 92px - var(--safe-top)); overflow: auto; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); }
 .filters-h { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .filters-h h3 { margin: 0; font-size: 15px; }
 .fsec { border-bottom: 1px solid var(--line2); }
@@ -82,7 +82,7 @@ button.icon.light { color: #c9d6ea; }
 .seg button:last-child { border-right: 0; } .seg button.on { background: var(--blue-l); color: var(--blue-d); font-weight: 600; }
 .seg button.warn { color: var(--amber); } .seg button.bad { color: var(--red); } .seg button.ok:disabled { color: var(--green); opacity: 1; }
 .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
-.bulkbar { position: sticky; top: 64px; z-index: 10; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--blue-l); border: 1px solid #bcd3fb; border-radius: var(--r); padding: 8px 12px; margin-bottom: 10px; }
+.bulkbar { position: sticky; top: calc(64px + var(--safe-top)); z-index: 10; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--blue-l); border: 1px solid #bcd3fb; border-radius: var(--r); padding: 8px 12px; margin-bottom: 10px; }
 .bulkbar .sep { width: 1px; height: 22px; background: #bcd3fb; }
 .bulkbar input { width: 150px; padding: 5px 8px; }
 
@@ -253,7 +253,7 @@ table.cards.deck td.qtycol { width: 30px; font-weight: 700; } table.cards.deck t
 .deck-pick.on select { border-color: var(--blue); background: var(--blue-l); color: var(--blue-d); font-weight: 600; }
 .tagbar select, .tag-new { padding: 4px 8px; font-size: 13px; } .tag-new { width: 170px; }
 .batch { container-type: inline-size; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
-.batch-head { position: sticky; top: 60px; z-index: 5; display: flex; gap: 8px 16px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+.batch-head { position: sticky; top: calc(60px + var(--safe-top)); z-index: 5; display: flex; gap: 8px 16px; align-items: center; justify-content: space-between; flex-wrap: wrap;
   padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; }
 .batch-head .actions { margin: 0; } .batch-total { font-size: 15px; }
 .batch-deck { display: flex; gap: 6px 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 9px 14px; background: var(--blue-l); color: var(--blue-d); border-radius: 12px 12px 0 0; }
@@ -292,7 +292,7 @@ table.cards.deck td.qtycol { width: 30px; font-weight: 700; } table.cards.deck t
   .hide-sm { display: none; } .top { gap: 12px; padding: 0 12px; } .worth { display: none; }
   .scan-grid, .add-body, .dest, .sr { grid-template-columns: 1fr; } .cd-top { flex-direction: column; } .card-img.lg { width: 220px; }
   .page { padding: 12px; }
-  .scan .cam { aspect-ratio: auto; height: 44vh; } .scan .page-head { flex-wrap: wrap; gap: 8px; } .batch-head { top: 52px; }
+  .scan .cam { aspect-ratio: auto; height: 44vh; } .scan .page-head { flex-wrap: wrap; gap: 8px; } .batch-head { top: calc(58px + var(--safe-top)); }
 }
 /* the batch list sits in a column whose width depends on the page, not the window: two lines per card when narrow */
 @container (max-width: 620px) {
@@ -380,8 +380,11 @@ button.big, .btn.big { font-size: 16px; padding: 10px 18px; }
 .qr { width: 200px; height: 200px; image-rendering: pixelated; }
 .phone-setup pre { background: #0f172a; color: #e2e8f0; padding: 10px 12px; border-radius: 6px; font-size: 13px; overflow-x: auto; }
 /* iPhone home-screen app: respect the notch / home indicator */
+/* The bar keeps its 58px below the status bar (the padding used to come out of them, crushing the tabs), and
+   everything that sticks under the bar moves down by the same amount. */
+:root { --safe-top: env(safe-area-inset-top, 0px); }
 @supports (padding: env(safe-area-inset-top)) {
-  header.top { padding-top: env(safe-area-inset-top); }
+  header.top { padding-top: var(--safe-top); height: calc(58px + var(--safe-top)); box-sizing: border-box; }
   .page { padding-bottom: env(safe-area-inset-bottom); }
 }
 

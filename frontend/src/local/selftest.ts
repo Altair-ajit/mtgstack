@@ -71,6 +71,10 @@ export async function run(events: string[]) {
     s.getTracks().forEach(x => x.stop());
     return info;
   }, v => v);
+  await timed("card database now", async () => (await fetch("/api/catalog/status")).json(),
+    s => `${s.printings} printings here, job ${s.job.state} ${s.job.total ? Math.round(100 * s.job.bytes / s.job.total) + "%" : ""}`);
+  const bar = document.querySelector("header.top");
+  if (bar) log(`header now ${Math.round(bar.getBoundingClientRect().height)} px, tabs ${[...bar.querySelectorAll("nav a")].map(a => Math.round(a.getBoundingClientRect().height)).join("/")} px tall`);
   log(`engine messages: ${events.join(" | ") || "none"}`);
   log("done");
 
