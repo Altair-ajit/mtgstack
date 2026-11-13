@@ -12,6 +12,17 @@ the device. Only the card database (about 47 MB) is downloaded, from the Pages s
   (`frontend/src/local/boot.ts`): iOS app web views have none.
 - CI: `.github/workflows/app.yml` builds a debug Android APK and compiles the iOS app on every push that touches the app.
 
+## Testing in the iOS simulator (no Mac needed)
+
+Every run of the workflow installs the app in an iPhone simulator on GitHub's Mac runner and lets it tour itself
+(`frontend/src/local/selftest.ts`, active only when the bundle contains `selftest.json`, which the job adds). The job
+log lists what the app reported (screen and safe area, storage available, card database, a detect and two scans of a
+sample card picture, whether the recognition model loaded) and the `ios-simulator` artifact has screenshots and the
+full log. Check it before uploading to TestFlight. The simulator has no real camera: the live camera is only tested on
+a phone.
+
+![The Scan page in the simulator](img/ios-simulator-scan.png)
+
 ## Android
 
 Download `mtgstack-android-debug` from the latest run of the "Installed app" workflow (Actions tab), unzip it, and open
