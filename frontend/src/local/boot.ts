@@ -1,10 +1,15 @@
-/** Phone build (GitHub Pages): no server. A service worker routes /api/* here, and this page forwards each
- * request to the Python app running in a Web Worker (public/py/worker.js). */
+/** Phone build (GitHub Pages) and the installed app (Capacitor): no server. The Python app runs in a Web Worker
+ * (public/py/worker.js) and this page forwards every /api/* request to it.
+ * On the website a service worker catches the requests (fetch, <img>, downloads) and hands them to this page.
+ * An installed iOS app has no service workers, so there (NATIVE) the page catches its own fetch() calls and loads
+ * /api/ images itself. */
 export const LOCAL = import.meta.env.VITE_LOCAL === "1";
+export const NATIVE = import.meta.env.VITE_NATIVE === "1";
 export const BUILD = import.meta.env.VITE_BUILD || "dev";
 const BASE = import.meta.env.BASE_URL;
 
-type Pending = { port: MessagePort; timer: number };
+type Reply = { status: number; headers: [string, string][]; body: ArrayBuffer };
+type Pending = { ok: (r: Reply) => void; timer: number };
 
 function show(msg: string, err = false) {
   const el = document.getElementById("boot");
@@ -19,21 +24,23 @@ export async function bootLocal(): Promise<void> {
   boot.id = "boot";
   document.body.appendChild(boot);
   show("Starting…");
-  if (!("serviceWorker" in navigator)) { show("This browser can't run the offline app (no service workers).", true); throw new Error("no sw"); }
+  const viaSw = !NATIVE && "serviceWorker" in navigator;
 
   try { await navigator.storage?.persist?.(); } catch { /* best effort: keep data from being evicted */ }
 
-  const reg = await navigator.serviceWorker.register(`${BASE}sw.js?v=${BUILD}`, { scope: BASE });
-  if (!navigator.serviceWorker.controller) {
-    await new Promise<void>(ok => {
-      navigator.serviceWorker.addEventListener("controllerchange", () => ok(), { once: true });
-      setTimeout(ok, 4000);
-    });
-    if (!navigator.serviceWorker.controller) { location.reload(); await new Promise(() => {}); }
+  if (viaSw) {
+    await navigator.serviceWorker.register(`${BASE}sw.js?v=${BUILD}`, { scope: BASE });
+    if (!navigator.serviceWorker.controller) {
+      await new Promise<void>(ok => {
+        navigator.serviceWorker.addEventListener("controllerchange", () => ok(), { once: true });
+        setTimeout(ok, 4000);
+      });
+      if (!navigator.serviceWorker.controller) { location.reload(); await new Promise(() => {}); }
+    }
   }
-  void reg;
 
-  const worker = new Worker(`${BASE}py/worker.js?v=${BUILD}`);
+  const data = import.meta.env.VITE_DATA_URL ? `&data=${encodeURIComponent(import.meta.env.VITE_DATA_URL)}` : "";
+  const worker = new Worker(`${BASE}py/worker.js?v=${BUILD}${data}`);
   const pending = new Map<number, Pending>();
   let n = 0;
   const ready = new Promise<void>((ok, bad) => {
@@ -57,24 +64,42 @@ export async function bootLocal(): Promise<void> {
       else if (m.type === "api") {
         const p = pending.get(m.id);
         pending.delete(m.id);
-        if (p) { clearTimeout(p.timer); p.port.postMessage({ status: m.status, headers: m.headers, body: m.body }, [m.body]); }
+        if (p) { clearTimeout(p.timer); p.ok({ status: m.status, headers: m.headers, body: m.body }); }
       }
     };
   });
-  navigator.serviceWorker.addEventListener("message", e => {
-    if (e.data?.type !== "api") return;
+  /** One API request to the Python app. `url` starts at /api/. */
+  const call = (method: string, url: string, headers: [string, string][], body: ArrayBuffer | null) => new Promise<Reply>(ok => {
     const id = ++n;
-    const port = e.ports[0];
     // never leave the UI hanging: if Python doesn't answer (e.g. the worker was killed), fail the request
     const timer = window.setTimeout(() => {
       pending.delete(id);
-      const body = new TextEncoder().encode(JSON.stringify({ detail: "The app didn't respond. Reload to restart it." })).buffer;
-      port.postMessage({ status: 504, headers: [["content-type", "application/json"]], body }, [body]);
+      const out = new TextEncoder().encode(JSON.stringify({ detail: "The app didn't respond. Reload to restart it." })).buffer as ArrayBuffer;
+      ok({ status: 504, headers: [["content-type", "application/json"]], body: out });
     }, 120000);
-    pending.set(id, { port, timer });
-    const { method, url, headers, body } = e.data;
+    pending.set(id, { ok, timer });
     worker.postMessage({ type: "api", id, method, url, headers, body }, body ? [body] : []);
   });
+  if (viaSw) {
+    navigator.serviceWorker.addEventListener("message", async e => {
+      if (e.data?.type !== "api") return;
+      const { method, url, headers, body } = e.data;
+      const r = await call(method, url, headers, body);
+      e.ports[0].postMessage(r, [r.body]);
+    });
+  } else {
+    const real = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const u = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, location.href);
+      const at = u.pathname.indexOf("/api/");
+      if (u.origin !== location.origin || at < 0) return real(input, init);
+      const req = input instanceof Request ? input : new Request(u.href, init);
+      const body = ["GET", "HEAD"].includes(req.method) ? null : await req.arrayBuffer();
+      const r = await call(req.method, u.pathname.slice(at) + u.search, [...req.headers.entries()], body);
+      return new Response([204, 304].includes(r.status) ? null : r.body, { status: r.status, headers: r.headers });
+    };
+    apiImages();
+  }
 
   // Links to /api/* downloads (CSV/zip export) would open outside the app: fetch and save them instead.
   document.addEventListener("click", async ev => {
@@ -102,6 +127,27 @@ export async function bootLocal(): Promise<void> {
   await ready;
   document.body.classList.add("booted");
   boot.remove();
+}
+
+/** Without a service worker an <img src="/api/..."> (Scanner Lab photos) has nobody to answer it: fetch the picture
+ * through the page (see the fetch above) and show it from memory instead. */
+function apiImages() {
+  const fix = (img: HTMLImageElement) => {
+    const src = img.getAttribute("src") || "";
+    if (!src.startsWith("/api/")) return;
+    img.removeAttribute("src");
+    fetch(src).then(r => (r.ok ? r.blob() : Promise.reject(new Error(String(r.status)))))
+      .then(b => { img.src = URL.createObjectURL(b); }).catch(() => {});
+  };
+  new MutationObserver(changes => {
+    for (const m of changes) {
+      if (m.type === "attributes") { if (m.target instanceof HTMLImageElement) fix(m.target); continue; }
+      m.addedNodes.forEach(node => {
+        if (node instanceof HTMLImageElement) fix(node);
+        else if (node instanceof Element) node.querySelectorAll("img").forEach(fix);
+      });
+    }
+  }).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["src"] });
 }
 
 function crashed(msg: string) {

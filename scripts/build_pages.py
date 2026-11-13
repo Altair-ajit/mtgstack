@@ -92,12 +92,20 @@ def main() -> None:
     ap.add_argument("--build-id", default=os.environ.get("GITHUB_SHA", "")[:12] or dt.datetime.now().strftime("%Y%m%d%H%M%S"))
     ap.add_argument("--skip-frontend", action="store_true")
     ap.add_argument("--model", default="", help="recognition model directory (scripts/build_index.py output) to publish")
+    ap.add_argument("--native", action="store_true",
+                    help="build for the installed app (Capacitor): no service worker, the page talks to the worker itself")
+    ap.add_argument("--data-url", default="", help="where the card database is published, if not next to the app "
+                    "(the installed app downloads it from the website), e.g. https://user.github.io/mtgstack/data/")
     a = ap.parse_args()
     out = Path(a.out).resolve()
     base = "/" + a.base.strip("/") + "/" if a.base.strip("/") else "/"
 
     if not a.skip_frontend:
         env = dict(os.environ, VITE_LOCAL="1", VITE_BUILD=a.build_id, PAGES_BASE=base, PAGES_OUT=str(out))
+        if a.native:
+            env["VITE_NATIVE"] = "1"
+        if a.data_url:
+            env["VITE_DATA_URL"] = a.data_url.rstrip("/") + "/"
         subprocess.run(["npm", "run", "build:pages"], cwd=ROOT / "frontend", env=env, check=True)
     shutil.copy(out / "index.html", out / "404.html")          # deep links (/mtgstack/decks/x) load the app
 

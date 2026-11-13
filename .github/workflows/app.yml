@@ -1,0 +1,116 @@
+# The installed app (Capacitor): the same web app as the GitHub Pages site, packaged for Android and iOS.
+# Every run builds a debug Android APK (download it from the run's Artifacts) and compiles the iOS app.
+# The card database is not bundled: the app downloads it from the Pages site.
+name: Installed app (Android + iOS)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "mtgstack/**"
+      - "model/**"
+      - "scripts/build_pages.py"
+      - ".github/workflows/app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web assets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        run: |
+          pip install -e .
+          npm ci --prefix frontend
+      - name: Cache Pyodide
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/mtgstack-pyodide
+          key: pyodide-0.29.5
+      - name: Build the app's web assets
+        run: >
+          python scripts/build_pages.py --out frontend/native-www --base / --native --model model
+          --data-url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-www
+          path: frontend/native-www
+          retention-days: 3
+
+  android:
+    name: Android (debug APK)
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-www
+          path: frontend/native-www
+      - name: Sync and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npx cap sync android
+          cd android
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mtgstack-android-debug
+          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
+
+  ios:
+    name: iOS (compile check)
+    needs: web
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-www
+          path: frontend/native-www
+      - name: Sync and build for the simulator (no signing)
+        working-directory: frontend
+        run: |
+          xcodebuild -version
+          npm ci
+          npx cap sync ios
+          xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO build | tail -40

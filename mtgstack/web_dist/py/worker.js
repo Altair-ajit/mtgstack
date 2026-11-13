@@ -9,6 +9,9 @@
 const V = new URL(self.location.href).searchParams.get("v") || "dev";
 const BASE = self.location.pathname.replace(/py\/worker\.js$/, "");          // e.g. "/mtgstack/"
 const PY = BASE + "py/";
+// Where the card database is published. The installed app (Capacitor) ships without it and downloads it from the
+// website, so the page passes ?data=<url>; on the website it sits next to the app.
+const DATA = new URL(self.location.href).searchParams.get("data") || `${BASE}data/`;
 const PYODIDE = `${PY}pyodide-0.29.5/`;   // keep in sync with scripts/build_pages.py
 const post = (m, t) => self.postMessage(m, t || []);
 const progress = msg => post({ type: "progress", msg });
@@ -87,11 +90,11 @@ self.mtgModelReady = false;
 
 async function modelFile(cache, name, version) {
   const url = `${BASE}data/model/${name}?v=${encodeURIComponent(version)}`;
-  let r = await cache.match(url);
+  let r = cache && (await cache.match(url));
   if (!r) {
     r = await fetch(url);
     if (!r.ok) throw new Error(`${name}: ${r.status}`);
-    await cache.put(url, r.clone());
+    if (cache) await cache.put(url, r.clone());
   }
   return r;
 }
@@ -99,17 +102,18 @@ async function modelFile(cache, name, version) {
 function loadModel() {
   if (modelLoading) return modelLoading;
   modelLoading = (async () => {
-    const cache = await caches.open(MODEL_CACHE);
+    // no Cache Storage in some app web views: the files are part of the app there, so nothing needs caching
+    const cache = self.caches ? await caches.open(MODEL_CACHE).catch(() => null) : null;
     const metaUrl = `${BASE}data/model/model.json`;
     let meta;
     try {
       const r = await fetch(metaUrl, { cache: "no-store" });
       if (r.status === 404) return null;                          // no model published: OCR only
       if (!r.ok) throw new Error(`model.json: ${r.status}`);
-      await cache.put(metaUrl, r.clone());
+      if (cache) await cache.put(metaUrl, r.clone());
       meta = await r.json();
     } catch (e) {                                                  // offline: use the copy from last time
-      const hit = await cache.match(metaUrl);
+      const hit = cache && (await cache.match(metaUrl));
       if (!hit) throw e;
       meta = await hit.json();
     }
@@ -120,7 +124,7 @@ function loadModel() {
       modelFile(cache, "embeddings.bin", v).then(r => r.arrayBuffer()),
       modelFile(cache, "embeddings-ids.json", v).then(r => r.json()),
     ]);
-    for (const req of await cache.keys())                          // drop files of older model versions
+    for (const req of cache ? await cache.keys() : [])             // drop files of older model versions
       if (req.url.includes("?v=") && !req.url.endsWith(`?v=${encodeURIComponent(v)}`)) await cache.delete(req);
     importScripts(`${ORT}ort.wasm.min.js`);
     self.ort.env.wasm.wasmPaths = ORT;
@@ -317,7 +321,7 @@ async function setupCatalogStorage() {
 // ---- card database ------------------------------------------------------------------------------------------------
 async function fetchRemoteCatalog() {
   try {
-    const r = await fetch(`${BASE}data/catalog.json`, { cache: "no-store" });
+    const r = await fetch(`${DATA}catalog.json`, { cache: "no-store" });
     remoteCatalog = r.ok ? await r.json() : null;
   } catch { remoteCatalog = null; }
   return remoteCatalog;
@@ -329,7 +333,7 @@ async function downloadCatalog() {
   try {
     const meta = remoteCatalog || (await fetchRemoteCatalog());
     if (!meta) throw new Error("card database not published yet (check the GitHub Actions run)");
-    const r = await fetch(`${BASE}data/${meta.file}`, { cache: "no-store" });
+    const r = await fetch(`${DATA}${meta.file}`, { cache: "no-store" });
     if (!r.ok) throw new Error(`download failed (${r.status})`);
     job.total = meta.size_gz || Number(r.headers.get("content-length")) || 0;
     const counter = new TransformStream({

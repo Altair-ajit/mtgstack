@@ -10,3 +10,4 @@ frontend/dist/
 scan-data/
 site/
 .wheels-tmp/
+frontend/native-www/

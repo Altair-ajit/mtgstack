@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import { BUILD, LOCAL } from "../local/boot";
+import { BUILD, LOCAL, NATIVE } from "../local/boot";
 
 /** Phone build: compare the build baked into this page with the one currently published on GitHub Pages. */
 async function latestBuild(): Promise<string> {
@@ -30,6 +30,6 @@ export default function UpdateBanner() {
     document.addEventListener("visibilitychange", vis);
     return () => { on = false; clearInterval(t); document.removeEventListener("visibilitychange", vis); };
   }, []);
-  if (!stale) return null;
+  if (!stale || NATIVE) return null;          // an installed app is updated by its store, not by a reload
   return <div className="banner update">A new version is ready. <button className="primary" onClick={() => location.reload()}>Reload</button></div>;
 }
