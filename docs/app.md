@@ -36,7 +36,8 @@ Needs an Apple Developer Program membership ($99 a year). No Mac is needed: GitH
 6. When the build finishes processing in App Store Connect, add yourself as an internal tester under TestFlight and
    install it with the TestFlight app.
 
-First run (13 Nov 2026): the archive step worked; the upload failed because the key had the "App Manager" role.
+The upload job works (first build uploaded 13 Nov 2026, with an Admin team key). Its first step checks the key
+against Apple and says what is wrong with it in a few seconds, before any build time is spent.
 
 ## Not done yet
 
