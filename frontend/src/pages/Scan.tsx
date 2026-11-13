@@ -115,15 +115,18 @@ export default function Scan() {
   };
   /** What the card's spot looks like, tiny and brightness-independent: tells when the card there was swapped. */
   const thumb = (c: [number, number][]): Float32Array | null => {
-    const v = video.current;
-    if (!v?.videoWidth) return null;
+    // read from the very frame the outline was found on (the tracker's canvas), not the live video: the picture
+    // moves on while a frame is being tracked, and a hand-held phone drifts
+    const src = canvases.current.small;
+    if (!src?.width) return null;
+    const v = { videoWidth: src.width, videoHeight: src.height };
     const cv = thumbCanvas.current || (thumbCanvas.current = Object.assign(document.createElement("canvas"), { width: 16, height: 16 }));
     const xs = c.map(p => p[0]), ys = c.map(p => p[1]);
     const x0 = Math.max(0, Math.min(...xs)) * v.videoWidth, y0 = Math.max(0, Math.min(...ys)) * v.videoHeight;
     const w = Math.min(1, Math.max(...xs)) * v.videoWidth - x0, h = Math.min(1, Math.max(...ys)) * v.videoHeight - y0;
     if (w < 8 || h < 8) return null;
     const g2 = cv.getContext("2d", { willReadFrequently: true })!;
-    g2.drawImage(v, x0, y0, w, h, 0, 0, 16, 16);
+    g2.drawImage(src, x0, y0, w, h, 0, 0, 16, 16);
     const d = g2.getImageData(0, 0, 16, 16).data, out = new Float32Array(256);
     let mean = 0;
     for (let i = 0; i < 256; i++) { out[i] = 0.3 * d[4 * i] + 0.59 * d[4 * i + 1] + 0.11 * d[4 * i + 2]; mean += out[i] / 256; }
