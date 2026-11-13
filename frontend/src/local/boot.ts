@@ -8,6 +8,9 @@ export const NATIVE = import.meta.env.VITE_NATIVE === "1";
 export const BUILD = import.meta.env.VITE_BUILD || "dev";
 const BASE = import.meta.env.BASE_URL;
 
+/** What the engine reported while starting (scanner and model state): read by the simulator self-test. */
+export const engineEvents: string[] = [];
+
 type Reply = { status: number; headers: [string, string][]; body: ArrayBuffer };
 type Pending = { ok: (r: Reply) => void; timer: number };
 
@@ -46,6 +49,7 @@ export async function bootLocal(): Promise<void> {
   const ready = new Promise<void>((ok, bad) => {
     worker.onmessage = e => {
       const m = e.data;
+      if (m.type === "scanner" || m.type === "model" || m.type === "error") engineEvents.push(`${m.type} ${m.state || ""} ${m.msg || m.version || ""}`.trim());
       if (m.type === "progress") { if (!document.body.classList.contains("booted")) show(m.msg); }
       else if (m.type === "scanner") {
         // shown once while it loads, and only where the camera is used

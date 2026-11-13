@@ -100,11 +100,14 @@ jobs:
           name: mtgstack-android-debug
           path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
 
+  # Builds the app for the iOS simulator, runs it there and lets it tour itself (frontend/src/local/selftest.ts):
+  # screenshots every few seconds and the app's log are kept as the "ios-simulator" artifact. The simulator has no
+  # camera, so this covers layout, start-up, storage and the scanning engine, not the live camera.
   ios:
-    name: iOS (compile check)
+    name: iOS (simulator run)
     needs: web
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -116,15 +119,41 @@ jobs:
         with:
           name: native-www
           path: frontend/native-www
-      - name: Sync and build for the simulator (no signing)
+      - name: Build for the simulator (no signing)
         working-directory: frontend
         run: |
           xcodebuild -version
           npm ci
+          echo '{"selftest": true}' > native-www/selftest.json
           npx cap sync ios
           xcodebuild -project ios/App/App.xcodeproj -scheme App -configuration Debug \
             -sdk iphonesimulator -destination "generic/platform=iOS Simulator" \
-            CODE_SIGNING_ALLOWED=NO build | tail -40
+            -derivedDataPath "$RUNNER_TEMP/dd" CODE_SIGNING_ALLOWED=NO build | tail -15
+      - name: Run it in a simulator
+        run: |
+          APP="$RUNNER_TEMP/dd/Build/Products/Debug-iphonesimulator/App.app"
+          ID=io.github.altairajit.mtgstack
+          OUT="$RUNNER_TEMP/sim"; mkdir -p "$OUT"
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; ok=[x for k in sorted(d, reverse=True) if 'iOS' in k for x in d[k] if x['name'].startswith('iPhone') and 'SE' not in x['name']]; print(ok[0]['udid']); print(ok[0]['name'], file=sys.stderr)")
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b | tail -2
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl privacy "$UDID" grant camera "$ID" || true
+          xcrun simctl launch --console-pty "$UDID" "$ID" > "$OUT/app.log" 2>&1 &
+          for i in $(seq -w 1 40); do
+            sleep 5
+            xcrun simctl io "$UDID" screenshot "$OUT/shot-$i.png" > /dev/null 2>&1 || true
+            if grep -q "SELFTEST done" "$OUT/app.log"; then sleep 3; xcrun simctl io "$UDID" screenshot "$OUT/shot-end.png" > /dev/null 2>&1 || true; break; fi
+          done
+          echo "---- what the app reported ----"
+          grep -a "SELFTEST" "$OUT/app.log" | sed 's/.*SELFTEST //' || echo "(nothing: see app.log in the artifact)"
+          grep -aq "SELFTEST done" "$OUT/app.log" || { echo "::error::The app did not finish its self-test in the simulator"; tail -30 "$OUT/app.log"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-simulator
+          path: ${{ runner.temp }}/sim
+          retention-days: 7
 
   # Manual only: Actions tab -> this workflow -> Run workflow -> tick "Upload the iOS app to TestFlight".
   # Signing is done by Xcode with an App Store Connect API key, so no certificates are stored here. docs/app.md
