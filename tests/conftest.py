@@ -8,7 +8,6 @@ from mtgstack.catalog import Catalog, upsert_cards
 
 os.environ["MTGSTACK_MODEL"] = "/nonexistent-mtgstack-model"   # tests never pick up an installed model
 
-os.environ["MTGSTACK_SCANS"] = tempfile.mkdtemp(prefix="mtgstack-test-scans-")   # ...nor write into the real Lab
 FIX = Path(__file__).parent / "fixtures" / "cards.json"
 
 @pytest.fixture

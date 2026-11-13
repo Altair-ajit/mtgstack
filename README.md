@@ -78,7 +78,7 @@ the internet is only used to download the card database / prices and to look up 
 
 **Good to know**
 - Data lives on the phone. iOS keeps the Home Screen app's storage separate from Safari's, so always use the icon.
-  Back up with *⋯ → Export collection* (TCGplayer CSV); share scans for tuning with *Scanner Lab → Export dataset*.
+  Back up with *⋯ → Export collection* (TCGplayer CSV).
 - Everything on `<you>.github.io` is one browser origin, so other Pages sites under your account could read this
   app's storage. Use a separate account/org or a custom domain if that matters.
 - Updates: push to `main`; open apps show a **Reload** bar. *Refresh prices* pulls the newest daily database.
@@ -92,7 +92,7 @@ The app runs on your PC; the phone is just the camera and screen. Two ways in:
 **Tailscale (recommended)** — real HTTPS, no certificate warnings, works on any network (home Wi-Fi, cellular).
 1. Install Tailscale on the PC (Windows app) and on the iPhone (App Store); sign in to the same account on both.
 2. In WSL: `./run.sh --tailscale --dev`. The first time it prints a link to turn on HTTPS/Serve for your tailnet; open
-   it, click enable, run the command again. It prints `https://<your-pc>.<tailnet>.ts.net/lab/live`.
+   it, click enable, run the command again. It prints `https://<your-pc>.<tailnet>.ts.net/scan`.
    (Under the hood: `tailscale serve --bg http://127.0.0.1:8765`, which Windows forwards into WSL. If calling the Windows
    Tailscale from WSL fails, run that line yourself in PowerShell.)
 3. In the app on the PC: **⋯ → Open on your phone** shows a QR code. Scan it with the iPhone camera.
@@ -101,8 +101,7 @@ The app runs on your PC; the phone is just the camera and screen. Two ways in:
 *Show Details → visit this website* once. Under WSL NAT networking you also need the one-time port-forward it prints.
 
 On the iPhone, Safari → Share → **Add to Home Screen** gives a full-screen app icon. `--dev` restarts the server when
-the code changes (e.g. after a `git pull`), and open pages show a **Reload** bar when a new version is live. Scans go to
-`scan-data/` on the PC either way.
+the code changes (e.g. after a `git pull`), and open pages show a **Reload** bar when a new version is live.
 
 ## 1. Tag-based storage
 
@@ -181,23 +180,6 @@ Every result includes a confidence score, ranked candidate printings, and an `ev
 - Scryfall's online fuzzy match is only accepted if it really resembles what was read, and lookups fall back to the
   local catalog when Scryfall can't be reached.
 
-### Scanner Lab (`/lab`)
-Every scan (camera, upload or CLI-free API) is saved to the **scan dataset**: `scan-data/` in the repo by default
-(`MTGSTACK_SCANS` to move it; gitignored). Each scan folder holds the photos, the straightened card, the title / type-line /
-collector crops, and `scan.json` with everything the scanner read and decided.
-
-- **▶ Live session** (`/lab/live`): camera on, show cards one at a time. Each is captured once it's steady and fully
-  in frame. Answer with **Y/Space** right, **N** wrong (card picker), **1–6** pick a suggestion, **F** fix the finish, **U** bad
-  photo, **R** rescan, **S** skip; then swap in the next card. Optionally adds confirmed cards to the collection as you go.
-  Big buttons on a phone (needs `--phone` for HTTPS).
-- On the **Scan** page, mark a result **✓ Right** or **✗ Wrong — fix it** (pick the real card). Adding a card you
-  corrected also records the correction.
-- In **Scanner Lab**, go through *To review* with the keyboard: **Y** right, **N** wrong (opens a card picker),
-  **U** bad photo. Each scan shows exactly what OCR read from each region, so you can see *where* it went wrong.
-- The stats show accuracy for card / printing / finish, the most common confusions (e.g. *Training Center → Aunt May*),
-  and whether confidence separates right from wrong answers.
-- **Re-run scanner on labelled scans** replays the current scanner over every labelled photo and reports what got
-  fixed and what broke, so scanner changes are measured against your real cards. **Export** zips the dataset.
 `needs_review` is set when either the identification or the finish is uncertain. In the UI, **Tilt burst** captures 6 frames while you tilt the card.
 
 ```bash

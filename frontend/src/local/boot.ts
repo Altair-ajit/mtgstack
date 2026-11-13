@@ -57,13 +57,13 @@ export async function bootLocal(): Promise<void> {
       if (m.type === "progress") { if (!document.body.classList.contains("booted")) show(m.msg); }
       else if (m.type === "scanner") {
         // shown once while it loads, and only where the camera is used
-        if (m.state === "loading" && /\/(scan|lab)/.test(location.pathname)) hint("Loading the scanner (first time only)…");
+        if (m.state === "loading" && /\/scan/.test(location.pathname)) hint("Loading the scanner (first time only)…");
         else if (m.state === "error") hint(`Scanner couldn't load: ${m.msg}`, 8000);
         else hint("");
       }
       else if (m.type === "model") {
         // until it is ready scans only read the text, which is much weaker: say so instead of failing silently
-        if (m.state === "loading" && /\/(scan|lab)/.test(location.pathname)) hint("Loading picture recognition (27 MB, first time only)…");
+        if (m.state === "loading" && /\/scan/.test(location.pathname)) hint("Loading picture recognition (27 MB, first time only)…");
         else if (m.state === "error") hint(`Picture recognition couldn't load: ${m.msg}. Scans will only read the text.`, 20000);
         else hint("");
       }
@@ -137,7 +137,7 @@ export async function bootLocal(): Promise<void> {
   boot.remove();
 }
 
-/** Without a service worker an <img src="/api/..."> (Scanner Lab photos) has nobody to answer it: fetch the picture
+/** Without a service worker an <img src="/api/..."> has nobody to answer it: fetch the picture
  * through the page (see the fetch above) and show it from memory instead. */
 function apiImages() {
   const fix = (img: HTMLImageElement) => {

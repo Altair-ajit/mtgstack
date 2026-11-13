@@ -320,7 +320,7 @@ def _serve(args):
         ts = _tailscale_serve(args.port, scheme)
         if ts.get("url"):
             phone.append({"url": ts["url"], "kind": "tailscale"})
-            print(f"  on your phone (Tailscale, anywhere): {ts['url']}/lab/live")
+            print(f"  on your phone (Tailscale, anywhere): {ts['url']}/scan")
         else:
             print("  Tailscale: " + ts.get("error", "not available"))
     if args.host in ("0.0.0.0", "::"):

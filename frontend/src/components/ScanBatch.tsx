@@ -9,8 +9,6 @@ export interface BatchItem {
   id: number; printing_id: string; name: string; set_code: string; set_name: string; number: string; image: string | null;
   finish: Finish; finishes: Finish[]; condition: string; language: string; qty: number; tags: string[];
   prices: Partial<Record<Finish, number | null>>; review: boolean;
-  /** Scanner Lab: the saved scan and what the scanner said, so a correction made here teaches it */
-  scan_id?: string; orig?: { printing_id: string; finish: Finish };
 }
 
 export const itemPrice = (i: BatchItem) => i.prices[i.finish] ?? null;

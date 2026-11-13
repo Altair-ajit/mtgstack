@@ -71,14 +71,6 @@ class Bulk(BaseModel):
     tags: list[str] = []
 
 
-class Label(BaseModel):
-    verdict: str                    # correct | wrong | unreadable
-    printing_id: str | None = None
-    finish: str | None = None
-    language: str | None = None
-    notes: str = ""
-
-
 class ImportPreview(BaseModel):
     text: str
     filename: str | None = None
@@ -232,14 +224,13 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
             return None
 
     @app.post("/api/scan")
-    async def api_scan(files: list[UploadFile] = File(...), save: bool = True, source: str = "scan",
+    async def api_scan(files: list[UploadFile] = File(...),
                        hints: str = Form(""), model_version: str = Form(""), corners: str = Form("")):
-        """Identify a card. The scan is also saved to the Scanner Lab (scan_id) so it can be labelled.
+        """Identify a card. Nothing is kept: the photos are read and dropped.
         `hints`: optional JSON list of picture matches the client computed with the recognition model,
         best first: [{"printing_id", "score", "group"}].
         `corners`: optional JSON [[x, y] x 4] (0-1 coords), the outline /api/detect just reported for this
         view: the card is then not searched for again."""
-        from . import scanlab
         from .scanner.resolve import Scanner
         data = [await f.read() for f in files]
         try:
@@ -258,8 +249,6 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         res["prices"] = {r[0]: r[1] for r in conn.execute(
             "SELECT finish, price FROM current_prices WHERE printing_id=? AND source='tcgplayer' AND kind='market'",
             (res["printing_id"],))} if res.get("printing_id") else {}
-        if save:
-            res["scan_id"] = scanlab.save(data, res, source=source[:20] or "scan")
         return res
 
     @app.post("/api/detect")
@@ -268,73 +257,6 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         from .scanner import detect
         img = detect.load(await file.read())
         return detect.track(img)
-
-    # ---- scanner lab -----------------------------------------------------------------------
-    from . import scanlab
-
-    def make_scanner(ocr_only: bool = False):
-        from .scanner.resolve import Scanner
-        return Scanner(catalog, fetch_images=online, recognizer=None if ocr_only else "default")
-
-    @app.post("/api/lab/upload")
-    async def api_lab_upload(files: list[UploadFile] = File(...)):
-        """Bulk: each photo is scanned separately and saved for review."""
-        out = []
-        for f in files:
-            b = await f.read()
-            try:
-                prepared = await prepare([b])
-                r = guard(lambda: make_scanner().scan([b], prepared=prepared)).to_dict()
-            except HTTPException as e:
-                r = {"name": None, "printing_id": None, "confidence": 0, "evidence": [str(e.detail)]}
-            out.append({"scan_id": scanlab.save([b], r, source="upload"), "name": r.get("name"), "file": f.filename})
-        return {"scans": out}
-
-    @app.get("/api/lab/scans")
-    def api_lab_scans(status: str = "", limit: int = 200, offset: int = 0):
-        return scanlab.list_scans(status, limit, offset)
-
-    @app.get("/api/lab/scans/{scan_id}")
-    def api_lab_scan(scan_id: str):
-        try:
-            return scanlab.get(scan_id)
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.get("/api/lab/file/{scan_id}/{name}")
-    def api_lab_file(scan_id: str, name: str):
-        try:
-            return FileResponse(scanlab.file_path(scan_id, name), media_type="image/jpeg")
-        except KeyError as e:
-            raise HTTPException(404, str(e))
-
-    @app.post("/api/lab/scans/{scan_id}/label")
-    def api_lab_label(scan_id: str, body: Label):
-        return guard(scanlab.label, conn, scan_id, body.verdict, body.printing_id, body.finish, body.language, body.notes)
-
-    @app.delete("/api/lab/scans/{scan_id}")
-    def api_lab_delete(scan_id: str):
-        guard(scanlab.delete, scan_id)
-        return {"ok": True}
-
-    @app.get("/api/lab/stats")
-    def api_lab_stats():
-        return scanlab.stats()
-
-    @app.post("/api/lab/rerun")
-    def api_lab_rerun(ocr_only: bool = False):
-        """Re-scan the labelled photos. `ocr_only=true` leaves the recognition model out, to compare the two."""
-        return scanlab.rerun(lambda: make_scanner(ocr_only), lock)
-
-    @app.get("/api/lab/rerun")
-    def api_lab_rerun_status():
-        return scanlab.RERUN
-
-    @app.get("/api/lab/export")
-    def api_lab_export():
-        from fastapi.responses import Response
-        return Response(scanlab.export_zip(), media_type="application/zip",
-                        headers={"Content-Disposition": "attachment; filename=mtgstack-scans.zip"})
 
     # ---- decks -----------------------------------------------------------------------------
     @app.get("/api/decks")
@@ -514,7 +436,8 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         """Changes whenever the UI is rebuilt or the scanner changes, so open pages can offer a reload."""
         idx = DIST / "index.html"
         stamp = int(idx.stat().st_mtime) if idx.exists() else 0
-        return {"build": f"{scanlab.SCANNER_VERSION}-{stamp}", "scanner": scanlab.SCANNER_VERSION}
+        from .scanner import VERSION
+        return {"build": f"{VERSION}-{stamp}", "scanner": VERSION}
 
     @app.get("/api/summary")
     def api_summary():

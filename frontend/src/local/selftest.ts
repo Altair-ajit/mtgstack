@@ -47,7 +47,7 @@ export async function run(events: string[]) {
   const header = document.querySelector("header.top");
   if (header) log(`header ${Math.round(header.getBoundingClientRect().height)} px tall, page ${document.documentElement.scrollWidth} px wide`);
 
-  for (const path of ["/", "/scan?mode=batch", "/decks", "/lab"]) { go(path); await sleep(7000); }
+  for (const path of ["/", "/scan?mode=batch", "/decks"]) { go(path); await sleep(7000); }
   go("/scan?mode=batch");
 
   await timed("api version", async () => (await fetch("/api/version")).json(), v => JSON.stringify(v));
@@ -59,7 +59,7 @@ export async function run(events: string[]) {
     await timed("detect", async () => (await fetch("/api/detect", { method: "POST", body: form("file") })).json(),
       r => (r.found ? `found, ${r.hint}` : `not found: ${JSON.stringify(r).slice(0, 200)}`));
     for (const n of [1, 2]) {
-      await timed(`scan ${n}`, async () => (await fetch("/api/scan?save=false", { method: "POST", body: form("files") })).json(),
+      await timed(`scan ${n}`, async () => (await fetch("/api/scan", { method: "POST", body: form("files") })).json(),
         r => (r.name ? `${r.name} (${r.set_code}) by ${r.recognizer}, model ${r.model_version || "none"}` : `nothing: ${JSON.stringify(r.evidence || r).slice(0, 300)}`));
       await sleep(6000);                           // the recognition model loads between scans
     }

@@ -4,7 +4,7 @@
  *   page -> {type:"api", id, method, url, headers, body}      worker -> {type:"api", id, status, headers, body}
  *   worker -> {type:"progress", msg} / {type:"ready"} / {type:"error", msg}
  *   worker -> {type:"scanner", state} / {type:"model", state, version}   (scanner libraries, recognition model)
- * Storage: IndexedDB-backed /data (user.db = your collection, catalog.sqlite = card database, scans/ = Scanner Lab).
+ * Storage: IndexedDB-backed /data (user.db = your collection, catalog.sqlite = card database).
  */
 const V = new URL(self.location.href).searchParams.get("v") || "dev";
 const BASE = self.location.pathname.replace(/py\/worker\.js$/, "");          // e.g. "/mtgstack/"
@@ -399,7 +399,7 @@ function enqueue(fn) {
   return p;
 }
 const json = (status, obj) => ({ status, headers: [["content-type", "application/json"]], body: new TextEncoder().encode(JSON.stringify(obj)) });
-const NEEDS_SCANNER = /^\/api\/(scan|detect|lab\/(upload|rerun))/;
+const NEEDS_SCANNER = /^\/api\/(scan|detect)/;
 
 async function api({ method, url, headers, body }) {
   const path = url.split("?")[0];
@@ -472,6 +472,12 @@ const ready = (async () => {
     py.FS.mkdirTree("/data");
     py.FS.mount(py.FS.filesystems.IDBFS, {}, "/data");
     await syncfs(true);
+    // Earlier versions kept a photo of every scan (the Scanner Lab, now gone): free that space once.
+    try {
+      const rm = dir => { for (const n of py.FS.readdir(dir)) { if (n === "." || n === "..") continue; const f = `${dir}/${n}`;
+        if (py.FS.isDir(py.FS.stat(f).mode)) rm(f); else py.FS.unlink(f); } py.FS.rmdir(dir); };
+      if (py.FS.analyzePath("/data/scans").exists) { rm("/data/scans"); await save(); }
+    } catch (e) { console.warn("could not remove old scans", e); }
     const catPath = await setupCatalogStorage();
     if (catPath) {
       try { py.FS.unlink("/data/catalog.sqlite"); await save(); } catch { /* none from an older version */ }

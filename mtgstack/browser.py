@@ -117,8 +117,7 @@ def start() -> None:
     os.makedirs(DATA, exist_ok=True)
     global CATALOG_DB
     CATALOG_DB = os.environ.get("MTGSTACK_CATALOG_DB") or CATALOG_DB    # worker.js: OPFS file or /data copy
-    os.environ.update(MTGSTACK_BROWSER="1", MTGSTACK_DB=USER_DB, MTGSTACK_CATALOG_DB=CATALOG_DB,
-                      MTGSTACK_SCANS=f"{DATA}/scans")
+    os.environ.update(MTGSTACK_BROWSER="1", MTGSTACK_DB=USER_DB, MTGSTACK_CATALOG_DB=CATALOG_DB)
     install_shims()
     from .server import create_app
     APP = create_app(USER_DB, online=True)

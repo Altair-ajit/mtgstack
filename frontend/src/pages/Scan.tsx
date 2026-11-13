@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, lab } from "../api";
+import { api } from "../api";
 import CardPicker from "../components/CardPicker";
 import { BatchRow, itemFor, itemPrice, sameCard, sameStack } from "../components/ScanBatch";
 import type { BatchItem } from "../components/ScanBatch";
@@ -11,7 +11,7 @@ import { CardImg, COND_LABEL, FINISH_LABEL, Modal, money, useToast } from "../ui
 
 interface Candidate { printing_id: string; name: string; set_code: string; set_name: string; collector_number: string; finishes: Finish[]; image: string | null; score: number }
 interface ScanResult {
-  scan_id?: string; debug?: Record<string, string>; markers?: { title_ocr?: string[]; type_ocr?: string[]; collector_ocr?: string[] };
+  debug?: Record<string, string>; markers?: { title_ocr?: string[]; type_ocr?: string[]; collector_ocr?: string[] };
   printing_id: string | null; name: string | null; set_code: string | null; collector_number: string | null; language: string;
   finish: Finish; finish_confidence: number; confidence: number; candidates: Candidate[]; evidence: string[]; needs_review: boolean;
   prices?: Partial<Record<Finish, number | null>>;
@@ -61,8 +61,6 @@ export default function Scan() {
   const [byName, setByName] = useState(false);
   const [namePick, setNamePick] = useState<{ printing_id: string; finish: Finish } | null>(null);
   const [log, setLog] = useState<LogItem[]>([]);
-  const [orig, setOrig] = useState<{ printing_id: string | null; finish: Finish } | null>(null);
-  const [labelled, setLabelled] = useState<string | null>(null);
   const [fixing, setFixing] = useState(false);
   const [fixPick, setFixPick] = useState<{ printing_id: string; name: string; set_code: string; number: string; finish: Finish } | null>(null);
   const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
@@ -194,7 +192,7 @@ export default function Scan() {
       // either of the two was unsure, and the row keeps the surer details (a corrected row counts as sure).
       const same = list.find(x => sameStack(x, it)) || list.find(x => sameCard(x, it) && (x.review || it.review));
       if (!same) { setFresh(it.id); return [it, ...list]; }
-      const base = same.review && !it.review ? { ...it, id: same.id, scan_id: same.scan_id, orig: same.orig } : same;
+      const base = same.review && !it.review ? { ...it, id: same.id } : same;
       const merged = { ...base, qty: same.qty + it.qty };
       const rest = list.filter(x => x !== same);
       const dup = rest.find(x => sameStack(x, merged));           // the surer details may match another row
@@ -208,16 +206,15 @@ export default function Scan() {
       id: Date.now(), printing_id: r.printing_id!, name: r.name || "", set_code: r.set_code || "", set_name: c?.set_name || "",
       number: r.collector_number || "", image: c?.image ?? null, finish: r.finish, finishes: c?.finishes?.length ? c.finishes : [r.finish],
       condition, language: r.language, qty: 1, tags: [...tags], prices: r.prices || {}, review: r.needs_review,
-      scan_id: r.scan_id, orig: { printing_id: r.printing_id!, finish: r.finish },
     };
   };
 
   const send = async (frames: Blob[], corners?: [number, number][]) => {
     setBusy(true);
     try {
-      const r: ScanResult = await api.scan(frames, "scan", corners);
+      const r: ScanResult = await api.scan(frames, corners);
       if (corners && r.printing_id) navigator.vibrate?.(40);
-      setRes(r); setFinish(r.finish); setOrig({ printing_id: r.printing_id, finish: r.finish }); setLabelled(null);
+      setRes(r); setFinish(r.finish);
       if (mode === "batch" && r.printing_id) stage(fromScan(r));
     } catch (e) { toast(String((e as Error).message), "err"); }
     setBusy(false);
@@ -229,20 +226,8 @@ export default function Scan() {
     await send(frames);
   };
 
-  /** Teach the Scanner Lab: right if the user kept the guess, otherwise a correction. */
-  const teach = async (r: ScanResult, fin: Finish, verdict?: "correct" | "wrong") => {
-    if (!r.scan_id || labelled === r.scan_id || !r.printing_id) return;
-    const changed = !orig || orig.printing_id !== r.printing_id || orig.finish !== fin;
-    const v = verdict || (changed ? "wrong" : "correct");
-    try {
-      await lab.label(r.scan_id, v === "wrong" ? { verdict: "wrong", printing_id: r.printing_id, finish: fin } : { verdict: "correct", finish: fin });
-      setLabelled(r.scan_id);
-    } catch { /* labelling is best-effort */ }
-  };
-
   const add = async (r: ScanResult, fin: Finish) => {
     if (!r.printing_id) return;
-    teach(r, fin);
     const out = await api.addLot({ printing_id: r.printing_id, qty: 1, finish: fin, condition, language: r.language, tags });
     await coverDecks([tags]);
     setLog(l => [{ id: Date.now(), name: r.name || out.name, set: r.set_code || "", finish: fin, lot: out.allocations[0]?.deck ? -1 : out.lot_id,
@@ -285,11 +270,6 @@ export default function Scan() {
       const out = await api.importCommit(rows as unknown as ImportRow[], newDeck
         ? { type: "deck", name: newDeck.name, format: newDeck.format, status: "built", owned: true } : { type: "collection", tags: [] });
       if (!newDeck) await coverDecks(items.map(i => i.tags));
-      for (const i of items) {                     // what was kept or corrected teaches the Scanner Lab
-        if (!i.scan_id || !i.orig) continue;
-        const wrong = i.orig.printing_id !== i.printing_id || i.orig.finish !== i.finish;
-        lab.label(i.scan_id, wrong ? { verdict: "wrong", printing_id: i.printing_id, finish: i.finish } : { verdict: "correct", finish: i.finish }).catch(() => {});
-      }
       setItems([]); setRes(null); setAdded({ cards: out.cards, allocations: out.allocations || [] });
       toast(newDeck ? `Created ${newDeck.name} with ${out.cards} cards` : `Added ${out.cards} card${out.cards === 1 ? "" : "s"} to your collection`);
       qc.invalidateQueries();
@@ -396,15 +376,9 @@ export default function Scan() {
                         <span className={`conf ${res.finish_confidence >= 0.9 ? "hi" : res.finish_confidence >= 0.6 ? "mid" : "lo"}`}>finish {Math.round(res.finish_confidence * 100)}%</span>
                         <button className="primary" onClick={() => add(res, finish)}>Add to collection</button>
                       </div>
-                      {res.scan_id && (
-                        <div className="actions teach">
-                          {labelled === res.scan_id ? <span className="muted small">✓ saved to Scanner Lab</span> : <>
-                            <span className="muted small">Was it right?</span>
-                            <button className="small" onClick={() => { teach(res, finish); toast("Thanks — recorded as right"); }}>✓ Right</button>
-                            <button className="small danger" onClick={() => setFixing(true)}>✗ Wrong — fix it</button>
-                          </>}
-                        </div>
-                      )}
+                      <div className="actions teach">
+                        <button className="small" onClick={() => setFixing(true)}>Not this card? Pick the right one</button>
+                      </div>
                       {res.candidates.length > 1 && (
                         <div className="cands">
                           {res.candidates.slice(0, 10).map(c => (
@@ -425,7 +399,7 @@ export default function Scan() {
                   </div>
                 ) : (
                   <div><h3>Couldn't identify this card</h3>
-                    {res.scan_id && <button className="small" onClick={() => setFixing(true)}>Tell it what this card is</button>}<ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
+                    <button className="small" onClick={() => setFixing(true)}>Pick the card by name</button><ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
                     <p className="muted">Try better light and fill more of the frame, or use Add cards.</p></div>
                 ))}
               </div>
@@ -469,13 +443,19 @@ export default function Scan() {
         <Modal title="What card is it really?" wide onClose={() => { setFixing(false); setFixPick(null); }} footer={<>
           <button onClick={() => { setFixing(false); setFixPick(null); }}>Cancel</button>
           <button className="primary" disabled={!fixPick} onClick={async () => {
-            if (!fixPick || !res.scan_id) return;
-            await lab.label(res.scan_id, { verdict: "wrong", printing_id: fixPick.printing_id, finish: fixPick.finish });
-            setLabelled(res.scan_id);
-            setRes({ ...res, printing_id: fixPick.printing_id, name: fixPick.name, set_code: fixPick.set_code, collector_number: fixPick.number, needs_review: false });
-            setFinish(fixPick.finish); setFixing(false); setFixPick(null);
-            toast("Correction saved to Scanner Lab — you can add the right card now");
-          }}>Save correction</button>
+            if (!fixPick) return;
+            const pick = fixPick;
+            setFixing(false); setFixPick(null); setFinish(pick.finish);
+            setRes({ ...res, printing_id: pick.printing_id, name: pick.name, set_code: pick.set_code, collector_number: pick.number,
+              needs_review: false, confidence: 1, finish_confidence: 1, prices: {}, candidates: [], evidence: ["picked by hand"] });
+            try {                                    // its picture and prices, for the result panel
+              const det = await api.card(pick.printing_id);
+              const p = det.printings.find(x => x.printing_id === pick.printing_id);
+              setRes(cur => (cur && cur.printing_id === pick.printing_id ? { ...cur, prices: p ? { nonfoil: p.price, foil: p.price_foil } : {},
+                candidates: [{ printing_id: pick.printing_id, name: pick.name, set_code: pick.set_code, set_name: det.card.set_name,
+                  collector_number: pick.number, finishes: det.card.finishes, image: det.card.image_normal, score: 1 }] } : cur));
+            } catch { /* the card is set either way */ }
+          }}>Use this card</button>
         </>}>
           <CardPicker initial={res.markers?.title_ocr?.[0] || res.name || ""} onPick={setFixPick} />
         </Modal>

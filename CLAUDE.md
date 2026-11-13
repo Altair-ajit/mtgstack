@@ -29,9 +29,8 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 - `mtgstack/query.py`: Scryfall-style query language over lots and deck entries
 - `mtgstack/scanner/`: detect.py (edges, any rotation; `proposals` = alternative outlines the model chooses among), markers.py (OCR), foil.py, resolve.py (title/type/collector arbitration, NameIndex),
   recognizer.py (optional ONNX picture match, tried before OCR), modeldata.py (manifest rows + index file format)
-- `mtgstack/scanlab.py`: scan dataset in `scan-data/` (MTGSTACK_SCANS): save, label, stats/confusions, re-run harness, export
 - `mtgstack/server.py`: REST API; serves web_dist with SPA fallback (`/classic` = the old single-file UI)
-- `frontend/src/`: `api.ts` (typed client), `pages/` (Collection, Decks, DeckDetail, Scan, Lab),
+- `frontend/src/`: `api.ts` (typed client), `pages/` (Collection, Decks, DeckDetail, Scan),
   `components/` (Filters, CardDrawer, ImportDialog, AddCard, CardPicker), `ui.tsx`, `styles.css`
 
 ## Conventions
@@ -40,8 +39,8 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 - Deck tags: `deck:<slug>` (main), `deck:<slug>:<board>`. A card is "free" when it has no `deck:` tag.
 - Auto-allocation only acts on cards entering the collection, never on existing ones (so overrides stick).
 - Scanner thresholds were tuned on synthetic images only. Validate changes against real photos: read the labelled
-  scans in `scan-data/` (each has `scan.json` + crops), and use Lab → Re-run (`POST /api/lab/rerun`) to compare
-  before/after. Bump `scanlab.SCANNER_VERSION` when the scanner changes.
+  photos you have by eye (the Scanner Lab that saved and replayed scans was removed: scans are no longer kept
+  anywhere, and `/api/scan` drops the photos once read). Bump `mtgstack.scanner.VERSION` when the scanner changes.
 
 ## Not verified yet
 - Live Scryfall/Card Kingdom calls (built in a sandbox without access), and the scanner on real photos.
@@ -58,7 +57,7 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 ## Card-recognition model
 Plan and current status are in `docs/scanner-model-plan.md`. Pipeline (training venv `~/mtg-data/.venv-train`, data in
 `~/mtg-data`): `scripts/fetch_images.py` -> `train_embedder.py` -> `export_onnx.py` -> `build_index.py` (writes
-`<run>/model`, the directory `MTGSTACK_MODEL` points at; default `~/.mtgstack/model`) -> `eval_lab.py` for real photos.
+`<run>/model`, the directory `MTGSTACK_MODEL` points at; default `~/.mtgstack/model`) (the Lab-based `eval_lab.py` is gone with the Lab).
 The scanner uses the model when it is installed and `onnxruntime` is importable, otherwise OCR only. Tests never load
 an installed model (conftest points `MTGSTACK_MODEL` at nothing); they use `recognizer=None` or a fake.
 Phone build: worker.js runs the model with onnxruntime-web (`py/ort-<ver>-512m/`, version pinned in worker.js `ORT` and

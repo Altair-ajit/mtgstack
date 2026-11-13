@@ -54,7 +54,7 @@ against Apple and says what is wrong with it in a few seconds, before any build 
 
 - The app has not been run on a real iPhone or Android phone, only built. The web variant it packages was checked in a
   desktop browser.
-- Exports (CSV, Scanner Lab zip) use a browser download, which app web views do not offer: they need a share sheet.
+- The CSV export uses a browser download, which app web views do not offer: it needs a share sheet.
 - Your collection lives in the web view's storage inside the app. A copy as a plain file (for backups and, later,
   for linking to an account) is the next step.
 - App icon and splash screen are Capacitor's defaults.

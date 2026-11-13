@@ -7,8 +7,6 @@ import Collection from "./pages/Collection";
 import Decks from "./pages/Decks";
 import DeckDetail from "./pages/DeckDetail";
 import Scan from "./pages/Scan";
-import Lab from "./pages/Lab";
-import LabLive from "./pages/LabLive";
 import ImportDialog from "./components/ImportDialog";
 import AddCard from "./components/AddCard";
 import PhoneDialog from "./components/PhoneDialog";
@@ -96,7 +94,6 @@ export default function App() {
                 <button onClick={async () => { setMenu(false); toast("Refreshing prices…", "info"); try { await fetch("/api/prices/refresh", { method: "POST" }); qc.invalidateQueries(); toast("Prices updated"); } catch { toast("Price refresh failed", "err"); } }}>Refresh prices</button>
                 <button onClick={async () => { setMenu(false); await api.syncCatalog(); qc.invalidateQueries({ queryKey: ["catalog-status"] }); }}>Re-download card database</button>
                 <a href="/api/export/tcgplayer" target="_blank">Export collection (TCGplayer CSV)</a>
-                <NavLink to="/lab" onClick={() => setMenu(false)}>Scanner Lab (saved scans)</NavLink>
                 {!LOCAL && <a href="/docs" target="_blank">API docs</a>}
                 {!LOCAL && <a href="/classic">Classic UI</a>}
               </div>
@@ -111,8 +108,6 @@ export default function App() {
         <Route path="/decks" element={<Decks />} />
         <Route path="/decks/:slug" element={<DeckDetail />} />
         <Route path="/scan" element={<Scan />} />
-        <Route path="/lab" element={<Lab />} />
-        <Route path="/lab/live" element={<LabLive />} />
         <Route path="*" element={<Collection />} />
       </Routes>
       {/* phones: the main sections sit under the thumb, like a store app; hidden on wider screens (styles.css) */}
