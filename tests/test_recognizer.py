@@ -336,7 +336,8 @@ def test_live_signature_tells_the_same_card_from_another():
     assert detect.signature_match(sa, detect.signature(b, qb)) < 0.5
     assert detect.track(a)["sig"] == sa
     flat = np.full((3 * detect.SIG_N ** 2,), 0).tolist()
-    assert detect.signature_match([flat, flat], sa) == 1.0                                    # cannot tell
+    assert detect.signature_match([flat, flat], [flat, flat]) == 1.0                          # cannot tell
+    assert detect.signature_match([flat, flat], sa) < 0.5                                     # e.g. a hand over the card
 
 
 def test_tracked_outline_saves_finding_the_card_again(mcat, monkeypatch):

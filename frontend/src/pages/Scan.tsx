@@ -117,8 +117,8 @@ export default function Scan() {
   const alike = (a: number[][], b: number[][]) => Math.max(...b.map(y => {
     let xy = 0, xx = 0, yy = 0;
     for (let i = 0; i < y.length; i++) { xy += a[0][i] * y[i]; xx += a[0][i] * a[0][i]; yy += y[i] * y[i]; }
-    const den = Math.sqrt(xx * yy);
-    return den > 1e3 ? xy / den : 1;               // a featureless picture cannot tell: assume the same card
+    // two featureless pictures cannot be told apart: the same card. One featureless and one not: different
+    return xx < 5e3 && yy < 5e3 ? 1 : xy / Math.max(Math.sqrt(xx * yy), 1);
   }));
   const maybeAuto = async (r: Track) => {
     const s = st.current;

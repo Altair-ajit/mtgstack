@@ -398,12 +398,13 @@ def signature(img: np.ndarray, corners: np.ndarray) -> list[list[int]]:
 
 def signature_match(a: list[list[int]], b: list[list[int]]) -> float:
     """-1..1: how alike two signatures are (the same card scores about 0.8+, another card about 0.2). The Scan
-    page does this sum itself; it is here for tests and tools. A featureless picture cannot tell: 1.0."""
+    page does this sum itself; it is here for tests and tools. Two featureless pictures cannot be told apart
+    (1.0); a featureless one against a real picture is a different thing (about 0)."""
     x = np.asarray(a[0], np.float32)
     best = -1.0
     for y in (np.asarray(v, np.float32) for v in b):
-        den = float(np.sqrt((x * x).sum() * (y * y).sum()))
-        best = max(best, float((x * y).sum()) / den if den > 1e3 else 1.0)
+        xx, yy = float((x * x).sum()), float((y * y).sum())
+        best = max(best, 1.0 if xx < 5e3 and yy < 5e3 else float((x * y).sum()) / max(np.sqrt(xx * yy), 1.0))
     return best
 
 
