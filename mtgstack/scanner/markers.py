@@ -174,13 +174,17 @@ def read_collector_line(card: np.ndarray) -> CollectorLine:
     return next((v for v in variants if v.ok), variants[0] if variants else CollectorLine())
 
 
-def read_collector_variants(card: np.ndarray) -> list[CollectorLine]:
+def read_collector_variants(card: np.ndarray, stop=None) -> list[CollectorLine]:
+    """Every rendering's reading. OCR is the slowest step of a scan: `stop(reading) -> bool` ends the loop as
+    soon as a reading is good enough for the caller, skipping the remaining renderings."""
     region = crop(card, "collector")
     out = []
     for name, th in binarize_variants(region):
         cl = _parse_collector(th)
         cl.evidence.append(f"(collector OCR variant: {name})")
         out.append(cl)
+        if stop is not None and stop(cl):
+            break
     return out
 
 

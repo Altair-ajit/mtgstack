@@ -19,12 +19,13 @@ export default function Scan() {
   const overlay = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [trackOn, setTrackOn] = useState(true);
-  const [auto, setAuto] = useState(false);
+  const [auto, setAutoState] = useState(localStorage.getItem("mtg.scan.auto") !== "0");
+  const setAuto = (on: boolean) => { localStorage.setItem("mtg.scan.auto", on ? "1" : "0"); setAutoState(on); };
   const [hint, setHint] = useState("");
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<ScanResult | null>(null);
   const [finish, setFinish] = useState<Finish>("nonfoil");
-  const [opts, setOpts] = useState({ condition: "NM", tags: localStorage.getItem("mtg.scan.tags") || "", autoAdd: false });
+  const [opts, setOpts] = useState({ condition: "NM", tags: localStorage.getItem("mtg.scan.tags") || "", autoAdd: localStorage.getItem("mtg.scan.autoAdd") === "1" });
   const [log, setLog] = useState<LogItem[]>([]);
   const [orig, setOrig] = useState<{ printing_id: string | null; finish: Finish } | null>(null);
   const [labelled, setLabelled] = useState<string | null>(null);
@@ -33,7 +34,9 @@ export default function Scan() {
   const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
   const toast = useToast();
   const qc = useQueryClient();
-  const st = useRef({ history: [] as ([number, number][] | null)[], armed: true, busy: false, last: null as [number, number][] | null });
+  const st = useRef({ history: [] as ([number, number][] | null)[], armed: true, busy: false, last: null as [number, number][] | null,
+    thumb: null as Float32Array | null });
+  const thumbCanvas = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => () => stream?.getTracks().forEach(t => t.stop()), [stream]);
 
@@ -72,12 +75,12 @@ export default function Scan() {
           } catch { /* keep going */ }
           st.current.busy = false;
         }
-        await new Promise(r => setTimeout(r, 120));
+        await new Promise(r => setTimeout(r, 30));
       }
     };
     loop();
     return () => { alive = false; };
-  }, [stream, trackOn, auto]); // eslint-disable-line
+  }, [stream, trackOn, auto, opts]); // eslint-disable-line
 
   const draw = (r: Track) => {
     const cv = overlay.current, v = video.current;
@@ -93,7 +96,7 @@ export default function Scan() {
     g.beginPath();
     r.corners.forEach(([x, y], i) => (i ? g.lineTo : g.moveTo).call(g, ox + x * v.videoWidth * k, oy + y * v.videoHeight * k));
     g.closePath(); g.fill(); g.stroke();
-    setHint(ready ? (auto ? "Hold steady…" : "Ready — tap Capture") : r.hint || "");
+    setHint(ready ? (auto ? (st.current.armed ? "Hold steady…" : "Scanned — next card") : "Ready — tap Capture") : r.hint || "");
   };
 
   const steady = () => {
@@ -107,22 +110,48 @@ export default function Scan() {
     }
     return n;
   };
+  /** What the card's spot looks like, tiny and brightness-independent: tells when the card there was swapped. */
+  const thumb = (c: [number, number][]): Float32Array | null => {
+    const v = video.current;
+    if (!v?.videoWidth) return null;
+    const cv = thumbCanvas.current || (thumbCanvas.current = Object.assign(document.createElement("canvas"), { width: 16, height: 16 }));
+    const xs = c.map(p => p[0]), ys = c.map(p => p[1]);
+    const x0 = Math.max(0, Math.min(...xs)) * v.videoWidth, y0 = Math.max(0, Math.min(...ys)) * v.videoHeight;
+    const w = Math.min(1, Math.max(...xs)) * v.videoWidth - x0, h = Math.min(1, Math.max(...ys)) * v.videoHeight - y0;
+    if (w < 8 || h < 8) return null;
+    const g2 = cv.getContext("2d", { willReadFrequently: true })!;
+    g2.drawImage(v, x0, y0, w, h, 0, 0, 16, 16);
+    const d = g2.getImageData(0, 0, 16, 16).data, out = new Float32Array(256);
+    let mean = 0;
+    for (let i = 0; i < 256; i++) { out[i] = 0.3 * d[4 * i] + 0.59 * d[4 * i + 1] + 0.11 * d[4 * i + 2]; mean += out[i] / 256; }
+    for (let i = 0; i < 256; i++) out[i] -= mean;
+    return out;
+  };
   const maybeAuto = async (r: Track) => {
     const s = st.current;
     s.history.push(r.found && r.hint === "ready" ? r.corners! : null);
     if (s.history.length > 8) s.history.shift();
-    if (!r.found) s.armed = true;
-    else if (s.last && r.corners && Math.max(...r.corners.map((p, k) => Math.hypot(p[0] - s.last![k][0], p[1] - s.last![k][1]))) > 0.12) s.armed = true;
-    if (!auto || !s.armed || steady() < 3) return;
-    s.armed = false; s.last = r.corners || null;
-    await send([await grab()]);
+    // Scan each card once: after a capture, wait until the card left, moved, or its spot looks different
+    // (the next card of a pile lands in the same place; a hand passing over it counts too, for identical copies).
+    if (!s.armed) {
+      if (!r.found) s.armed = true;
+      else if (s.last && r.corners && Math.max(...r.corners.map((p, k) => Math.hypot(p[0] - s.last![k][0], p[1] - s.last![k][1]))) > 0.12) s.armed = true;
+      else if (s.last && s.thumb) {
+        const t = thumb(s.last);
+        if (t && t.reduce((n, x, i) => n + Math.abs(x - s.thumb![i]), 0) / 256 > 18) s.armed = true;
+      }
+    }
+    if (!auto || !s.armed || !r.corners || steady() < 2) return;
+    s.armed = false; s.last = r.corners; s.thumb = thumb(r.corners);
+    await send([await grab()], r.corners);
     s.history = [];
   };
 
-  const send = async (frames: Blob[]) => {
+  const send = async (frames: Blob[], corners?: [number, number][]) => {
     setBusy(true);
     try {
-      const r: ScanResult = await api.scan(frames);
+      const r: ScanResult = await api.scan(frames, "scan", corners);
+      if (corners && r.printing_id) navigator.vibrate?.(40);
       setRes(r); setFinish(r.finish); setOrig({ printing_id: r.printing_id, finish: r.finish }); setLabelled(null);
       if (opts.autoAdd && r.printing_id && !r.needs_review) await add(r, r.finish);
     } catch (e) { toast(String((e as Error).message), "err"); }
@@ -178,7 +207,7 @@ export default function Scan() {
             <div className="actions">
               <label className="check"><input type="checkbox" checked={trackOn} onChange={e => setTrackOn(e.target.checked)} /> Outline the card</label>
               <label className="check"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Auto-capture when steady</label>
-              <label className="check"><input type="checkbox" checked={opts.autoAdd} onChange={e => setOpts({ ...opts, autoAdd: e.target.checked })} /> Auto-add confident scans</label>
+              <label className="check"><input type="checkbox" checked={opts.autoAdd} onChange={e => { localStorage.setItem("mtg.scan.autoAdd", e.target.checked ? "1" : "0"); setOpts({ ...opts, autoAdd: e.target.checked }); }} /> Auto-add confident scans</label>
             </div>
             <div className="actions">
               <label>Condition <select value={opts.condition} onChange={e => setOpts({ ...opts, condition: e.target.value })}>

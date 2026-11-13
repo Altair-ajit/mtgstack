@@ -217,13 +217,13 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
     # async (list of rectified cards) -> list of Match. The desktop server leaves it None (onnxruntime, in-process).
     app.state.picture_matcher = None
 
-    async def prepare(data: list[bytes]):
+    async def prepare(data: list[bytes], corners=None):
         if app.state.picture_matcher is None:
             return None
         from .scanner import detect
         from .scanner.resolve import prepare_crops
         try:
-            return await prepare_crops(detect.load(data[0]), app.state.picture_matcher)
+            return await prepare_crops(detect.load(data[0]), app.state.picture_matcher, corners)
         except Exception as e:                           # a broken model must never break scanning
             import logging
             logging.getLogger("mtgstack.scanner").warning("picture recognition failed: %s: %s", type(e).__name__, e)
@@ -231,10 +231,12 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
 
     @app.post("/api/scan")
     async def api_scan(files: list[UploadFile] = File(...), save: bool = True, source: str = "scan",
-                       hints: str = Form(""), model_version: str = Form("")):
+                       hints: str = Form(""), model_version: str = Form(""), corners: str = Form("")):
         """Identify a card. The scan is also saved to the Scanner Lab (scan_id) so it can be labelled.
         `hints`: optional JSON list of picture matches the client computed with the recognition model,
-        best first: [{"printing_id", "score", "group"}]."""
+        best first: [{"printing_id", "score", "group"}].
+        `corners`: optional JSON [[x, y] x 4] (0-1 coords), the outline /api/detect just reported for this
+        view: the card is then not searched for again."""
         from . import scanlab
         from .scanner.resolve import Scanner
         data = [await f.read() for f in files]
@@ -243,9 +245,13 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
                          and isinstance(h.get("score"), (int, float))][:50] if hints else None
         except ValueError:
             raise HTTPException(400, "hints must be a JSON list")
-        prepared = None if hint_list else await prepare(data)
+        try:
+            outline = json.loads(corners) if corners else None
+        except ValueError:
+            outline = None                                # only a shortcut: a bad one is ignored
+        prepared = None if hint_list else await prepare(data, outline)
         res = guard(lambda: Scanner(catalog, fetch_images=online).scan(
-            data, hints=hint_list, hints_version=model_version[:60], prepared=prepared)).to_dict()
+            data, hints=hint_list, hints_version=model_version[:60], prepared=prepared, corners=outline)).to_dict()
         if save:
             res["scan_id"] = scanlab.save(data, res, source=source[:20] or "scan")
         return res

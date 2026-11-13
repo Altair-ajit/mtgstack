@@ -45,6 +45,9 @@ def _cand(p: dict, score: float, why: str) -> dict:
             "score": round(score, 3), "why": why}
 
 
+COLLECTOR_LINE_SINCE = "1998-06-15"     # Exodus: the first set with a collector number printed on the card
+
+
 def _choose(pairs):
     """Pick among (rectified card, picture match) pairs, the detector's own choice first.
     -> (card, match or None, True if a later outline was taken)."""
@@ -63,16 +66,21 @@ def _choose(pairs):
     return best
 
 
-async def prepare_crops(frame: np.ndarray, matcher) -> list | None:
+async def prepare_crops(frame: np.ndarray, matcher, corners=None) -> list | None:
     """For recognisers that can only be awaited: rectify the card every way the detector proposes and match the
     crops up front. `matcher`: async (list of cards) -> list of Match (or None = no model). The result is
-    `Scanner.scan(prepared=...)`; None means no model answered and the scan should go the usual way."""
-    props = detect.proposals(frame)
+    `Scanner.scan(prepared=...)`; None means no model answered and the scan should go the usual way.
+    `corners`: the outline live tracking found (0-1 coords); if its crop matches confidently the card is not
+    searched for again."""
+    given = detect.outline_from(frame, corners) if corners is not None else None
+    props = [given] if given is not None else detect.proposals(frame)
     cards = [detect.warp(frame, props[0])]
     matches = list(await matcher(cards))
     if not matches or matches[0] is None:
         return None
     if not matches[0].confident:
+        if given is not None:
+            props += detect.proposals(frame)
         for i in range(1, len(props), 4):                # a few at a time: stop as soon as one clearly fits
             more = [detect.warp(frame, q) for q in props[i:i + 4]]
             got = list(await matcher(more))
@@ -94,7 +102,8 @@ class Scanner:
 
     # ------------------------------------------------------------------------------------------
     def scan(self, images: list[bytes | np.ndarray | str], debug: bool = True,
-             hints: list[dict] | None = None, hints_version: str = "", prepared: list | None = None) -> ScanResult:
+             hints: list[dict] | None = None, hints_version: str = "", prepared: list | None = None,
+             corners=None) -> ScanResult:
         """`images`: one photo, or a short tilt burst of the same card (enables shimmer foil detection).
 
         Every marker is read several ways, each reading is checked against the catalog, and the readings are
@@ -108,20 +117,23 @@ class Scanner:
         falls back to the OCR pipeline and is offered among the candidates.
         `prepared`: the first photo's crops already matched elsewhere (see `prepare_crops`; the phone build runs
         the model in JavaScript, which Python can only await outside this synchronous call).
+        `corners`: the first photo's card outline as live tracking found it (0-1 coords), so the card is not
+        searched for a second time; a picture match that dislikes the crop still tries the detector's outlines.
         """
         frames = [detect.load(i) for i in images]
         res = ScanResult()
         idx = NameIndex.get(self.catalog)
         switched = False
+        given = detect.outline_from(frames[0], corners) if corners is not None else None
         if prepared:
             card, match, switched = _choose(prepared)
             cards = [card] + [detect.warp(f) for f in frames[1:]]
         elif self.recognizer is not None and not hints:
             # the detector proposes several outlines; the picture match tells which one really is the card
-            card, match, switched = self._best_crop(frames[0])
+            card, match, switched = self._best_crop(frames[0], given)
             cards = [card] + [self._best_crop(f)[0] if switched else detect.warp(f) for f in frames[1:]]
         else:
-            cards = [detect.warp(f) for f in frames]
+            cards = [detect.warp(frames[0], given)] + [detect.warp(f) for f in frames[1:]]
             match = self._picture_match(cards[0], hints, hints_version)
         if switched:
             res.evidence.append("the first outline found matched poorly; used another outline of the card")
@@ -184,10 +196,14 @@ class Scanner:
             logging.getLogger("mtgstack.scanner").warning("picture recognition failed: %s: %s", type(e).__name__, e)
         return None
 
-    def _best_crop(self, frame: np.ndarray):
+    def _best_crop(self, frame: np.ndarray, given: np.ndarray | None = None):
         """Rectify the card, letting the picture match choose among the detector's outlines when its first
-        choice matches poorly (typically it locked onto the art box). -> (card, match or None, switched?)"""
+        choice matches poorly (typically it locked onto the art box). -> (card, match or None, switched?)
+        `given`: an outline already known (live tracking), tried before the detector runs at all."""
         def pairs():
+            if given is not None:
+                card = detect.warp(frame, given)
+                yield card, self._picture_match(card, None, "")
             for q in detect.proposals(frame):
                 card = detect.warp(frame, q)
                 yield card, self._picture_match(card, None, "")
@@ -227,12 +243,29 @@ class Scanner:
             return 2 if num and st else 1 if num or st else 0
 
         # the model is indifferent to which way up the card is, the collector line is not: read it both ways
-        best = None
-        for flipped in (False, True):
+        # Reading it is the slowest step of a scan, so stop at the first reading that settles the printing, and
+        # don't look for a line on cards printed before there was one (collector numbers start with Exodus).
+        # Older cards have no such line, and reprints of their artwork keep them out of `no_line`: when the first
+        # rendering shows no trace of one (no number, no set code, not a digit) the other renderings are skipped.
+        seen = []
+
+        def settled(v) -> bool:
+            seen.append(v)
+            trace = v.number or v.set_code or any(ch.isdigit() for ch in v.raw or "")
+            return (len(seen) == 1 and not trace) or any(agree(v, p) == 2 for p in pool) or (len(pool) == 1 and v.ok)
+
+        # The pool is ordered best match first; reprints share the artwork but not the frame, so the closest
+        # printing tells the era of the card in hand.
+        no_line = (pool[0]["released_at"] or "9999") < COLLECTOR_LINE_SINCE and pool[0]["set_code"] != "por"
+        best = (0, None, None, cards, [])
+        if no_line:
+            res.evidence.append("printed before cards had a collector line: bottom text not read")
+        for flipped in (() if no_line else (False, True)):
             cs = [detect.rotate180(c) for c in cards] if flipped else cards
-            variants = markers.read_collector_variants(cs[0])
+            seen.clear()
+            variants = markers.read_collector_variants(cs[0], stop=settled)
             top = max(((agree(v, p), v, p) for v in variants for p in pool), key=lambda t: t[0], default=(0, None, None))
-            if best is None or top[0] > best[0]:
+            if not flipped or top[0] > best[0]:
                 best = (*top, cs, variants)
             if best[0] == 2 or (len(pool) == 1 and any(v.ok for v in variants)):
                 break

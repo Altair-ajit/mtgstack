@@ -360,6 +360,22 @@ def _find(img: np.ndarray):
     return corners, round(float(best_score), 3), [o / scale for o in others]
 
 
+def outline_from(img: np.ndarray, corners) -> np.ndarray | None:
+    """An outline already found on a smaller copy of this frame (live tracking; four corners in 0-1 coords),
+    snapped to the edges at full resolution. Saves finding the card a second time. None = unusable."""
+    try:
+        q = np.asarray(corners, np.float32).reshape(4, 2)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(q).all() or q.min() < -0.05 or q.max() > 1.05:
+        return None
+    h, w = img.shape[:2]
+    q = _order(q * np.array([w, h], np.float32))
+    if cv2.contourArea(q) < 0.02 * w * h or not cv2.isContourConvex(q):
+        return None
+    return _order(refine(_gradient(img), q, radius=max(3, int(max(h, w) / 300))))
+
+
 def track(img: np.ndarray) -> dict:
     """Cheap per-frame report for live camera guidance: where the card is and whether it's ready to capture."""
     h, w = img.shape[:2]

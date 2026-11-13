@@ -142,9 +142,11 @@ export const api = {
   importPreview: (text: string, filename?: string) => post<ImportPreview>("/api/import/preview", { text, filename }),
   importCommit: (rows: ImportRow[], dest: Record<string, unknown>) =>
     post<{ cards: number; rows: number; deck?: string; allocations: Allocation[] }>("/api/import/commit", { rows, dest }),
-  scan: (files: Blob[], source = "scan") => {
+  /** `corners`: the outline api.detect just reported for this view, so the card isn't searched for again */
+  scan: (files: Blob[], source = "scan", corners?: [number, number][]) => {
     const fd = new FormData();
     files.forEach((f, i) => fd.append("files", f, `frame${i}.jpg`));
+    if (corners) fd.append("corners", JSON.stringify(corners));
     return fetch(`/api/scan?source=${encodeURIComponent(source)}`, { method: "POST", body: fd }).then(async r => {
       const d = await r.json(); if (!r.ok) throw new Error(d.detail || r.statusText); return d;
     });

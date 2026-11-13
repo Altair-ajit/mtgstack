@@ -289,6 +289,43 @@ def test_matched_printings_missing_from_the_catalog_are_fetched(conn):
     assert r.recognizer == "ocr"                       # nothing to go on: falls back without crashing
 
 
+def test_confident_picture_match_reads_as_little_text_as_it_needs(mcat, conn, monkeypatch):
+    """OCR is the slow part of a scan: one reading that settles the printing is enough, and cards printed before
+    collector lines existed are not read at all."""
+    from mtgstack.scanner import markers
+    calls = []
+    real = markers._parse_collector
+    monkeypatch.setattr(markers, "_parse_collector", lambda th: calls.append(1) or real(th))
+    shared = [U("roe/101"), U("cmr/358"), U("spm/44")]
+    r = Scanner(mcat, fetch_images=False, recognizer=FakeModel(shared)).scan([photo(card_image("Brass Orrery", "CMR", "358"))])
+    assert (r.printing_id, r.recognizer, len(calls)) == (U("cmr/358"), "model+ocr", 1)
+
+    upsert_cards(conn, [card("Old Relic", "lea", "1", released_at="1993-08-05")])
+    NameIndex._cache.clear()
+    calls.clear()
+    r = Scanner(mcat, fetch_images=False, recognizer=FakeModel([U("lea/1")])).scan([photo(card_image("Old Relic", "LEA", "1"))])
+    assert (r.name, r.recognizer, calls) == ("Old Relic", "model", [])
+    assert any("before cards had a collector line" in e for e in r.evidence)
+
+
+def test_tracked_outline_saves_finding_the_card_again(mcat, monkeypatch):
+    from mtgstack.scanner import detect
+    img = detect.load(photo(card_image("Brass Orrery", "CMR", "358")))
+    h, w = img.shape[:2]
+    corners = (detect.find_card(img) / [w, h]).tolist()          # what /api/detect reports
+    searched = []
+    real = detect.proposals
+    monkeypatch.setattr(detect, "proposals", lambda frame, limit=12: searched.append(1) or real(frame, limit))
+    sc = Scanner(mcat, fetch_images=False, recognizer=FakeModel([U("cmr/358")]))
+    r = sc.scan([img], corners=corners)
+    assert r.printing_id == U("cmr/358") and not searched
+    # an unsure match, or an outline that makes no sense, still gets the full search
+    unsure = Scanner(mcat, fetch_images=False, recognizer=FakeModel([U("cmr/358")], score=0.4, margin=0.01))
+    assert unsure.scan([img], corners=corners).printing_id == U("cmr/358") and searched
+    searched.clear()
+    assert sc.scan([img], corners=[[0, 0], [0, 0], "x"]).printing_id == U("cmr/358") and searched
+
+
 def test_title_is_looked_up_online_when_the_card_database_is_missing(conn):
     """Card database not downloaded and no picture match: a title that was read must still name the card."""
     asked = []
