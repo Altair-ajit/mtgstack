@@ -65,3 +65,10 @@ Phone build: worker.js runs the model with onnxruntime-web (`py/ort-<ver>-512m/`
 checked by build_pages.py, which also patches its 4 GB shared-memory maximum down to 512 MB: iPhones refuse 4 GB) when `data/model/` is published (`build_pages.py --model DIR`; CI uses the committed
 `model/`, which `run.sh` also uses by default). JS can only be awaited, so the server awaits `app.state.picture_matcher` in `prepare()` and
 passes `Scanner.scan(prepared=...)`. Not done yet: a test on a real phone, new printings in the index.
+
+## Installed app (Capacitor, iOS + Android)
+Setup, status and what is not done: `docs/app.md`. Projects in `frontend/android` and `frontend/ios`, CI in
+`.github/workflows/app.yml` (debug APK + iOS compile on push; TestFlight upload is a manual run that needs Apple secrets).
+The app packages the phone build made with `build_pages.py --native`: iOS app web views have no service worker, so
+`frontend/src/local/boot.ts` catches the page's own `/api` fetches instead (and loads `/api` images itself). Anything
+new that reaches `/api` other than through `fetch` or an `<img>` will work on the website and fail in the app.
