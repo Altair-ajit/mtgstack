@@ -18,6 +18,11 @@ on:
         description: "Upload the iOS app to TestFlight (needs the Apple secrets, see docs/app.md)"
         type: boolean
         default: false
+      certificates:
+        description: "Apple signing certificates: list them, or revoke the development ones CI created (docs/app.md)"
+        type: choice
+        options: [none, list, revoke-ci]
+        default: none
 
 permissions:
   contents: read
@@ -223,3 +228,28 @@ jobs:
             -exportPath "$RUNNER_TEMP/export" -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
             -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" | tail -40
+
+  # Manual only. Every TestFlight run makes a development certificate on a fresh machine, and the account only holds a
+  # few: "list" shows what is there, "revoke-ci" removes the ones CI created (scripts/appstore_certs.py).
+  certificates:
+    name: Apple certificates (${{ inputs.certificates }})
+    if: github.event_name == 'workflow_dispatch' && inputs.certificates != 'none'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+      ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: ${{ inputs.certificates }}
+        env:
+          PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+          KEY_FILE: ${{ runner.temp }}/AuthKey.p8
+          MODE: ${{ inputs.certificates }}
+        run: |
+          printf '%s' "$PRIVATE_KEY" > "$KEY_FILE"
+          pip -q install pyjwt cryptography
+          if [ "$MODE" = "revoke-ci" ]; then python scripts/appstore_certs.py --revoke-ci; else python scripts/appstore_certs.py; fi
