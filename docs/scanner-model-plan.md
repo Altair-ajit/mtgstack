@@ -130,8 +130,29 @@ labels: each match was checked by eye against the matched reference image. 76 ph
   crop is not confident. Outlines elsewhere in the photo are deliberately not tried: with several cards in view
   the model then jumps to a neighbour. The OCR-only path (no model installed) does not get this fix.
 
-Not done: Lab photos from this user's own phone (`scan-data/` is empty; `eval_lab.py` is ready for them), on-device inference (onnxruntime-web),
-publishing model + index with the Pages build, embedding new printings in the daily Action, Lab UI for model vs OCR.
+**On the phone** (GitHub Pages build; done, tested in a desktop browser only):
+- `frontend/public/py/worker.js` loads onnxruntime-web (wasm, one thread; `py/ort-<ver>/`, copied from
+  `node_modules` by `scripts/build_pages.py`) and, when `data/model/model.json` exists, downloads
+  `embedder.onnx` + `embeddings.bin` + `embeddings-ids.json` (27 MB, once; kept in Cache Storage per model
+  version, so it works offline afterwards). No model published = the scanner reads the text as before.
+- onnxruntime-web can only be awaited and Pyodide's scan is synchronous, so the scan is split: the server's
+  `prepare()` -> `resolve.prepare_crops` rectifies the detector's outlines and awaits
+  `app.state.picture_matcher` (`browser._picture_matcher` -> `mtgMatch` in the worker: embed, int8 kNN, neighbours
+  in the `hints` shape); `Scanner.scan(prepared=...)` then runs as on the desktop. Alternative outlines are matched
+  4 at a time and stop at the first clear fit.
+- Measured in desktop Chrome on the local build with the real v1 model and the full catalog: same cards and scores
+  as the desktop app on 7 real photos (incl. 3 that need an alternative outline); model load 0.5 s from cache,
+  ~0.1 s per crop (~1 s when all 11 alternatives are tried); a whole scan is 2-10 s, most of it detection and
+  Tesseract in WebAssembly, as before. The float16-weights ONNX file loads fine in onnxruntime-web 1.31.
+- Publishing: the Pages workflow downloads the assets of a GitHub release tagged `model` (if there is one) and
+  passes `--model` to `build_pages.py`. Upload a new model with
+  `gh release create model ~/mtg-data/runs/v1/model/embed*` (or `gh release upload model ... --clobber`).
+
+Not done: the `model` release itself (so the live phone app does not have the model yet), a check on a real
+phone (speed, memory; iOS Safari), Lab re-run with the model on the phone (re-run there is OCR only), Lab photos
+from this user's own phone (`scan-data/` is empty; `eval_lab.py` is ready for them), embedding new printings in
+the daily Action (new cards are unknown to the index until the model release is rebuilt), a "this is a card back"
+answer, telling same-art old printings apart.
 
 ## Environment notes
 - Dev happens in WSL (Ubuntu) on Windows; repo at `/mnt/c/Users/Rajit/Desktop/Projects/mtgstack`.

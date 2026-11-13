@@ -95,6 +95,21 @@ def _ocr(png: bytes, psm: int) -> str:
     return str(js.mtgOcr(to_js(png), psm))
 
 
+async def _picture_matcher(cards):
+    """Picture matches for rectified cards from the model the worker runs with onnxruntime-web (worker.js:
+    mtgMatch). [None, ...] while the model is not loaded or not published: the scan then uses OCR only."""
+    import json
+    import js
+    import numpy as np
+    from pyodide.ffi import to_js
+    from .scanner.recognizer import match_from_hints, preprocess
+    if not js.self.mtgModelReady:
+        return [None] * len(cards)
+    x = np.concatenate([preprocess(c) for c in cards])
+    out = json.loads(str(await js.self.mtgMatch(to_js(x.tobytes()), len(cards))))
+    return [match_from_hints(h, out["version"]) for h in out["matches"]]
+
+
 # ---- app lifecycle ------------------------------------------------------------------------------------------
 def start() -> None:
     """Configure the environment and build the FastAPI app (call once after /data is mounted)."""
@@ -107,6 +122,7 @@ def start() -> None:
     install_shims()
     from .server import create_app
     APP = create_app(USER_DB, online=True)
+    APP.state.picture_matcher = _picture_matcher
 
 
 def enable_scanner() -> None:

@@ -3,6 +3,7 @@
  * Page  <-> worker messages:
  *   page -> {type:"api", id, method, url, headers, body}      worker -> {type:"api", id, status, headers, body}
  *   worker -> {type:"progress", msg} / {type:"ready"} / {type:"error", msg}
+ *   worker -> {type:"scanner", state} / {type:"model", state, version}   (scanner libraries, recognition model)
  * Storage: IndexedDB-backed /data (user.db = your collection, catalog.sqlite = card database, scans/ = Scanner Lab).
  */
 const V = new URL(self.location.href).searchParams.get("v") || "dev";
@@ -40,6 +41,7 @@ function loadScanner() {
     await initOcr();
     B.enable_scanner();
     post({ type: "scanner", state: "ready" });
+    loadModel().catch(() => {});                 // optional and large: the scanner works while it downloads
   })();
   scannerReady.catch(e => {
     console.error("scanner load failed", e);
@@ -73,6 +75,113 @@ self.mtgOcr = (png, psm) => {
   if (api.SetImageFile(1, 0) === 1) return "";
   api.Recognize(null);
   return api.GetTSVText() || "";
+};
+
+// ---- card recognition model (onnxruntime-web) -----------------------------------------------------------------
+// Optional: data/model/ holds a small ONNX model + an index of every printing's picture (docs/scanner-model-plan.md).
+// Python rectifies the card and awaits mtgMatch(); without the files the scanner simply reads the text as before.
+const ORT = `${PY}ort-1.31.1/`;           // keep in sync with scripts/build_pages.py
+const MODEL_CACHE = "mtgstack-model";
+let model = null, modelLoading = null;
+self.mtgModelReady = false;
+
+async function modelFile(cache, name, version) {
+  const url = `${BASE}data/model/${name}?v=${encodeURIComponent(version)}`;
+  let r = await cache.match(url);
+  if (!r) {
+    r = await fetch(url);
+    if (!r.ok) throw new Error(`${name}: ${r.status}`);
+    await cache.put(url, r.clone());
+  }
+  return r;
+}
+
+function loadModel() {
+  if (modelLoading) return modelLoading;
+  modelLoading = (async () => {
+    const cache = await caches.open(MODEL_CACHE);
+    const metaUrl = `${BASE}data/model/model.json`;
+    let meta;
+    try {
+      const r = await fetch(metaUrl, { cache: "no-store" });
+      if (r.status === 404) return null;                          // no model published: OCR only
+      if (!r.ok) throw new Error(`model.json: ${r.status}`);
+      await cache.put(metaUrl, r.clone());
+      meta = await r.json();
+    } catch (e) {                                                  // offline: use the copy from last time
+      const hit = await cache.match(metaUrl);
+      if (!hit) throw e;
+      meta = await hit.json();
+    }
+    post({ type: "model", state: "loading", version: meta.model_version });
+    const v = meta.model_version;
+    const [onnx, bin, ids] = await Promise.all([
+      modelFile(cache, "embedder.onnx", v).then(r => r.arrayBuffer()),
+      modelFile(cache, "embeddings.bin", v).then(r => r.arrayBuffer()),
+      modelFile(cache, "embeddings-ids.json", v).then(r => r.json()),
+    ]);
+    for (const req of await cache.keys())                          // drop files of older model versions
+      if (req.url.includes("?v=") && !req.url.endsWith(`?v=${encodeURIComponent(v)}`)) await cache.delete(req);
+    importScripts(`${ORT}ort.wasm.min.js`);
+    self.ort.env.wasm.wasmPaths = ORT;
+    self.ort.env.wasm.numThreads = 1;                              // no cross-origin isolation on GitHub Pages
+    const session = await self.ort.InferenceSession.create(new Uint8Array(onnx), { executionProviders: ["wasm"] });
+    const dim = ids.dim, count = ids.keys.length;
+    if (bin.byteLength !== dim * count) throw new Error("model index does not match its id list");
+    model = { session, index: new Int8Array(bin), dim, count, keys: ids.keys, groups: Int32Array.from(ids.groups),
+              version: ids.model_version || v, input: meta.input || [312, 224] };
+    self.mtgModelReady = true;
+    post({ type: "model", state: "ready", version: model.version, count });
+    return model;
+  })();
+  modelLoading.catch(e => {
+    console.error("recognition model not loaded", e);
+    post({ type: "model", state: "error", msg: String(e.message || e) });
+  });
+  return modelLoading;
+}
+
+/** One embedding -> the neighbours Python's match_from_hints expects: every printing of the best artwork
+ * (best first), then the best row of each of the next 5 artworks. Mirrors Recognizer.match in recognizer.py. */
+function neighbours(vec) {
+  const { index, dim, count, keys, groups } = model;
+  let norm = 0;
+  for (let j = 0; j < dim; j++) norm += vec[j] * vec[j];
+  norm = Math.sqrt(norm) || 1;
+  const q = new Int32Array(dim);
+  for (let j = 0; j < dim; j++) q[j] = Math.max(-127, Math.min(127, Math.round(127 * vec[j] / norm)));
+  const sims = new Float32Array(count);
+  let best = 0;
+  for (let i = 0, o = 0; i < count; i++, o += dim) {
+    let s = 0;
+    for (let j = 0; j < dim; j++) s += index[o + j] * q[j];
+    sims[i] = s / 16129;
+    if (sims[i] > sims[best]) best = i;
+  }
+  const printing = i => keys[i].split(".")[0];
+  const g0 = groups[best], same = [];
+  for (let i = 0; i < count; i++) if (groups[i] === g0) same.push(i);
+  same.sort((a, b) => sims[b] - sims[a]);
+  const out = same.slice(0, 60).map(i => ({ printing_id: printing(i), score: sims[i], group: g0 }));
+  const seen = new Set([g0]);
+  for (let k = 0; k < 5; k++) {
+    let top = -1;
+    for (let i = 0; i < count; i++) if (!seen.has(groups[i]) && (top < 0 || sims[i] > sims[top])) top = i;
+    if (top < 0) break;
+    seen.add(groups[top]);
+    out.push({ printing_id: printing(top), score: sims[top], group: groups[top] });
+  }
+  return out;
+}
+
+// Awaited from Python (mtgstack.browser._picture_matcher): n model inputs (float32 NCHW, RGB 0..1) -> JSON
+self.mtgMatch = async (bytes, n) => {
+  const [h, w] = model.input;
+  const data = new Float32Array(bytes.slice().buffer, 0, n * 3 * h * w);
+  const res = await model.session.run({ image: new self.ort.Tensor("float32", data, [n, 3, h, w]) });
+  const emb = res.embedding.data, matches = [];
+  for (let i = 0; i < n; i++) matches.push(neighbours(emb.subarray(i * model.dim, (i + 1) * model.dim)));
+  return JSON.stringify({ version: model.version, matches });
 };
 
 // ---- card database file on disk (OPFS) -------------------------------------------------------------------------
@@ -296,7 +405,12 @@ async function api({ method, url, headers, body }) {
     if (remote && remote.version !== local) { downloadCatalog(); return json(200, { updating: true, version: remote.version }); }
     return json(200, { up_to_date: true, version: local });
   }
-  if (NEEDS_SCANNER.test(path)) await loadScanner();
+  if (NEEDS_SCANNER.test(path)) {
+    await loadScanner();
+    // Scans block this thread, so a model still loading would never finish between them: give it a moment first
+    // (it is quick once cached; a first download carries on in the background and the scan reads the text).
+    if (!model && modelLoading) await Promise.race([modelLoading.catch(() => {}), new Promise(r => setTimeout(r, 4000))]);
+  }
   const res = await enqueue(async () => {
     const r = await handle(method, url, headers, body ? new Uint8Array(body) : null);
     const [status, hdrs, out] = r.toJs();

@@ -213,6 +213,22 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         return [{"name": n, "score": s} for n, s in guard(catalog.fuzzy_name, text)]
 
     # ---- scanner ---------------------------------------------------------------------------
+    # The phone build runs the recognition model in JavaScript, which can only be awaited: it sets this to an
+    # async (list of rectified cards) -> list of Match. The desktop server leaves it None (onnxruntime, in-process).
+    app.state.picture_matcher = None
+
+    async def prepare(data: list[bytes]):
+        if app.state.picture_matcher is None:
+            return None
+        from .scanner import detect
+        from .scanner.resolve import prepare_crops
+        try:
+            return await prepare_crops(detect.load(data[0]), app.state.picture_matcher)
+        except Exception as e:                           # a broken model must never break scanning
+            import logging
+            logging.getLogger("mtgstack.scanner").warning("picture recognition failed: %s: %s", type(e).__name__, e)
+            return None
+
     @app.post("/api/scan")
     async def api_scan(files: list[UploadFile] = File(...), save: bool = True, source: str = "scan",
                        hints: str = Form(""), model_version: str = Form("")):
@@ -227,8 +243,9 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
                          and isinstance(h.get("score"), (int, float))][:50] if hints else None
         except ValueError:
             raise HTTPException(400, "hints must be a JSON list")
+        prepared = None if hint_list else await prepare(data)
         res = guard(lambda: Scanner(catalog, fetch_images=online).scan(
-            data, hints=hint_list, hints_version=model_version[:60])).to_dict()
+            data, hints=hint_list, hints_version=model_version[:60], prepared=prepared)).to_dict()
         if save:
             res["scan_id"] = scanlab.save(data, res, source=source[:20] or "scan")
         return res
@@ -254,7 +271,8 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         for f in files:
             b = await f.read()
             try:
-                r = guard(lambda: make_scanner().scan([b])).to_dict()
+                prepared = await prepare([b])
+                r = guard(lambda: make_scanner().scan([b], prepared=prepared)).to_dict()
             except HTTPException as e:
                 r = {"name": None, "printing_id": None, "confidence": 0, "evidence": [str(e.detail)]}
             out.append({"scan_id": scanlab.save([b], r, source="upload"), "name": r.get("name"), "file": f.filename})

@@ -45,6 +45,44 @@ def _cand(p: dict, score: float, why: str) -> dict:
             "score": round(score, 3), "why": why}
 
 
+def _choose(pairs):
+    """Pick among (rectified card, picture match) pairs, the detector's own choice first.
+    -> (card, match or None, True if a later outline was taken)."""
+    it = iter(pairs)
+    card, first = next(it)
+    if first is None or first.confident:
+        return card, first, False
+    best = (card, first, False)
+    for c, m in it:
+        if m is None:
+            break
+        if (m.confident, m.score) > (best[1].confident, best[1].score) and (m.confident or m.score >= first.score + 0.05):
+            best = (c, m, True)
+            if m.confident and m.score >= 0.85:
+                break
+    return best
+
+
+async def prepare_crops(frame: np.ndarray, matcher) -> list | None:
+    """For recognisers that can only be awaited: rectify the card every way the detector proposes and match the
+    crops up front. `matcher`: async (list of cards) -> list of Match (or None = no model). The result is
+    `Scanner.scan(prepared=...)`; None means no model answered and the scan should go the usual way."""
+    props = detect.proposals(frame)
+    cards = [detect.warp(frame, props[0])]
+    matches = list(await matcher(cards))
+    if not matches or matches[0] is None:
+        return None
+    if not matches[0].confident:
+        for i in range(1, len(props), 4):                # a few at a time: stop as soon as one clearly fits
+            more = [detect.warp(frame, q) for q in props[i:i + 4]]
+            got = list(await matcher(more))
+            cards += more
+            matches += got
+            if any(m is not None and m.confident and m.score >= 0.85 for m in got):
+                break
+    return list(zip(cards, matches))
+
+
 class Scanner:
     def __init__(self, catalog: Catalog, fetch_images: bool = True, recognizer="default"):
         """`recognizer`: a recognizer.Recognizer, None for OCR only, or "default" = the installed model if any."""
@@ -56,7 +94,7 @@ class Scanner:
 
     # ------------------------------------------------------------------------------------------
     def scan(self, images: list[bytes | np.ndarray | str], debug: bool = True,
-             hints: list[dict] | None = None, hints_version: str = "") -> ScanResult:
+             hints: list[dict] | None = None, hints_version: str = "", prepared: list | None = None) -> ScanResult:
         """`images`: one photo, or a short tilt burst of the same card (enables shimmer foil detection).
 
         Every marker is read several ways, each reading is checked against the catalog, and the readings are
@@ -68,19 +106,25 @@ class Scanner:
         [{"printing_id", "score", "group"}]) the picture is looked up first. A confident match names the card
         without reading the title, and only the collector line is read to pick the printing; an unsure match
         falls back to the OCR pipeline and is offered among the candidates.
+        `prepared`: the first photo's crops already matched elsewhere (see `prepare_crops`; the phone build runs
+        the model in JavaScript, which Python can only await outside this synchronous call).
         """
         frames = [detect.load(i) for i in images]
         res = ScanResult()
         idx = NameIndex.get(self.catalog)
-        if self.recognizer is not None and not hints:
+        switched = False
+        if prepared:
+            card, match, switched = _choose(prepared)
+            cards = [card] + [detect.warp(f) for f in frames[1:]]
+        elif self.recognizer is not None and not hints:
             # the detector proposes several outlines; the picture match tells which one really is the card
             card, match, switched = self._best_crop(frames[0])
             cards = [card] + [self._best_crop(f)[0] if switched else detect.warp(f) for f in frames[1:]]
-            if switched:
-                res.evidence.append("the first outline found matched poorly; used another outline of the card")
         else:
             cards = [detect.warp(f) for f in frames]
             match = self._picture_match(cards[0], hints, hints_version)
+        if switched:
+            res.evidence.append("the first outline found matched poorly; used another outline of the card")
         if match is not None:
             res.model_version = match.model_version or None
             if match.confident and self._decide_by_picture(match, cards, res, idx, debug):
@@ -142,22 +186,11 @@ class Scanner:
     def _best_crop(self, frame: np.ndarray):
         """Rectify the card, letting the picture match choose among the detector's outlines when its first
         choice matches poorly (typically it locked onto the art box). -> (card, match or None, switched?)"""
-        props = detect.proposals(frame)
-        card = detect.warp(frame, props[0])
-        match = self._picture_match(card, None, "")
-        if match is None or match.confident:
-            return card, match, False
-        best = (card, match, False)
-        for q in props[1:]:
-            c = detect.warp(frame, q)
-            m = self._picture_match(c, None, "")
-            if m is None:
-                break
-            if (m.confident, m.score) > (best[1].confident, best[1].score) and (m.confident or m.score >= match.score + 0.05):
-                best = (c, m, True)
-                if m.confident and m.score >= 0.85:
-                    break
-        return best
+        def pairs():
+            for q in detect.proposals(frame):
+                card = detect.warp(frame, q)
+                yield card, self._picture_match(card, None, "")
+        return _choose(pairs())
 
     def _decide_by_picture(self, match, cards: list[np.ndarray], res: ScanResult, idx: "NameIndex", debug: bool) -> bool:
         """The picture is a confident match: take the card from it and use the collector line only to choose

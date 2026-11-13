@@ -214,6 +214,56 @@ def test_model_picks_among_detector_outlines(mcat, monkeypatch):
     assert any("outline" in e for e in r.evidence)
 
 
+def test_awaited_matcher_prepares_the_crops(mcat, monkeypatch):
+    """The phone build can only await its model (JavaScript): crops are matched up front and handed to scan()."""
+    import asyncio
+    from mtgstack.scanner import detect
+    from mtgstack.scanner.resolve import prepare_crops
+    img = detect.load(photo(card_image("Brass Orrery", "CMR", "358")))
+    good = detect.find_card(img)
+    c = good.mean(0)
+    monkeypatch.setattr(detect, "proposals", lambda frame, limit=12: [c + (good - c) * 0.5, good])
+    asked = []
+
+    async def matcher(cards):                     # unsure about the first crop it ever sees, sure about later ones
+        out = []
+        for _ in cards:
+            sure = bool(asked)
+            asked.append(1)
+            out.append(Match(printings=[U("roe/101"), U("cmr/358")], score=0.93 if sure else 0.45,
+                             margin=0.5 if sure else 0.02, model_version="js-1"))
+        return out
+    prepared = asyncio.run(prepare_crops(img, matcher))
+    assert len(prepared) == 2 and len(asked) == 2
+    r = Scanner(mcat, fetch_images=False, recognizer=None).scan([img], prepared=prepared)
+    assert (r.printing_id, r.recognizer, r.model_version) == (U("cmr/358"), "model+ocr", "js-1")
+    assert any("outline" in e for e in r.evidence)
+
+    async def no_model(cards):
+        return [None] * len(cards)
+    assert asyncio.run(prepare_crops(img, no_model)) is None
+
+
+def test_server_uses_an_awaited_matcher(tmp_path):
+    import cv2
+    from fastapi.testclient import TestClient
+    from mtgstack.server import create_app
+    app = create_app(str(tmp_path / "t.db"), online=False)
+    upsert_cards(app.state.conn, [card("Iron Gyre", "dom", "90")])
+    app.state.conn.commit()
+    NameIndex._cache.clear()
+    calls = []
+
+    async def matcher(cards):
+        calls.append(len(cards))
+        return [Match(printings=[U("dom/90")], score=0.9, margin=0.5, model_version="js-1") for _ in cards]
+    app.state.picture_matcher = matcher
+    img = photo(card_image("Xqzv Wkrrt", "QQQ", "999"))                 # text the catalog does not know
+    body = cv2.imencode(".jpg", img)[1].tobytes()
+    r = TestClient(app).post("/api/scan?save=false", files={"files": ("a.jpg", body, "image/jpeg")}).json()
+    assert r["name"] == "Iron Gyre" and r["recognizer"] == "model" and r["model_version"] == "js-1" and calls == [1]
+
+
 def test_hints_from_the_caller_and_broken_models(mcat):
     img = photo(card_image("Brass Orrery", "CMR", "358"))
     hints = [{"printing_id": U("roe/101"), "score": 0.91, "group": 1}, {"printing_id": U("cmr/358"), "score": 0.9, "group": 1},

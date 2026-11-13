@@ -24,6 +24,7 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
+    "onnxruntime-web": "^1.31.1",
     "oxlint": "^1.90.0",
     "tesseract.js-core": "^6.1.2",
     "typescript": "~7.0.2",

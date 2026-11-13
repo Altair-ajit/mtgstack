@@ -10,6 +10,8 @@ Layout of the output:
     py/pyodide-<ver>/                                        Pyodide core + only the packages we use
     py/wheels/python_multipart.whl, py/app.zip               pure-Python extras + the mtgstack package
     py/tesseract/                                            Tesseract OCR (WebAssembly) + English model
+    py/ort-<ver>/                                            onnxruntime-web (runs the card-recognition model)
+    data/model/                                              recognition model + index, only with --model DIR
     version.json                                             build id (the app offers a reload when it changes)
 """
 from __future__ import annotations
@@ -29,6 +31,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PYODIDE_VERSION = "0.29.5"
 PACKAGES = ["fastapi", "sqlite3", "httpx", "pydantic", "opencv-python", "numpy"]
+ORT_FILES = ["ort.wasm.min.js", "ort-wasm-simd-threaded.mjs", "ort-wasm-simd-threaded.wasm"]
+MODEL_FILES = ["embedder.onnx", "embeddings.bin", "embeddings-ids.json"]
 CORE = ["pyodide.js", "pyodide.asm.js", "pyodide.asm.wasm", "python_stdlib.zip", "pyodide-lock.json"]
 
 
@@ -64,6 +68,21 @@ def closure(lock: dict, names: list[str]) -> set[str]:
     return out
 
 
+def publish_model(src: Path, dst: Path) -> None:
+    """Copy the recognition model + index and write the small manifest the worker checks on every start."""
+    missing = [f for f in MODEL_FILES if not (src / f).is_file()]
+    if missing:
+        sys.exit(f"--model {src}: missing {', '.join(missing)}")
+    dst.mkdir(parents=True, exist_ok=True)
+    for f in MODEL_FILES:
+        shutil.copy(src / f, dst / f)
+    ids = json.loads((src / "embeddings-ids.json").read_text())
+    meta = {"model_version": ids["model_version"], "dim": ids["dim"], "count": len(ids["keys"]), "input": [312, 224],
+            "files": {f: (src / f).stat().st_size for f in MODEL_FILES}}
+    (dst / "model.json").write_text(json.dumps(meta))
+    print(f"model {meta['model_version']}: {meta['count']} images, {sum(meta['files'].values()) / 2**20:.0f} MB")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="site")
@@ -71,6 +90,7 @@ def main() -> None:
     ap.add_argument("--pyodide-cache", default=str(Path.home() / ".cache" / "mtgstack-pyodide"))
     ap.add_argument("--build-id", default=os.environ.get("GITHUB_SHA", "")[:12] or dt.datetime.now().strftime("%Y%m%d%H%M%S"))
     ap.add_argument("--skip-frontend", action="store_true")
+    ap.add_argument("--model", default="", help="recognition model directory (scripts/build_index.py output) to publish")
     a = ap.parse_args()
     out = Path(a.out).resolve()
     base = "/" + a.base.strip("/") + "/" if a.base.strip("/") else "/"
@@ -111,6 +131,18 @@ def main() -> None:
         for ext in (".js", ".wasm"):
             shutil.copy(nm / "tesseract.js-core" / f"{core}{ext}", tess / f"{core}{ext}")
     shutil.copy(nm / "@tesseract.js-data" / "eng" / "4.0.0_best_int" / "eng.traineddata.gz", tess / "eng.traineddata.gz")
+
+    ort_src = nm / "onnxruntime-web"
+    ort_ver = json.loads((ort_src / "package.json").read_text())["version"]
+    ort = py / f"ort-{ort_ver}"                                 # versioned: the service worker caches py/ forever
+    ort.mkdir(parents=True, exist_ok=True)
+    for f in ORT_FILES:
+        shutil.copy(ort_src / "dist" / f, ort / f)
+    if f"ort-{ort_ver}/" not in (out / "py" / "worker.js").read_text():
+        sys.exit(f"worker.js expects a different onnxruntime-web than the installed {ort_ver}: update its ORT path")
+
+    if a.model:
+        publish_model(Path(a.model).expanduser(), out / "data" / "model")
 
     (out / "version.json").write_text(json.dumps({"build": a.build_id, "pyodide": PYODIDE_VERSION,
                                                    "built_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")}))

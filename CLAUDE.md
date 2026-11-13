@@ -61,4 +61,7 @@ Plan and current status are in `docs/scanner-model-plan.md`. Pipeline (training 
 `<run>/model`, the directory `MTGSTACK_MODEL` points at; default `~/.mtgstack/model`) -> `eval_lab.py` for real photos.
 The scanner uses the model when it is installed and `onnxruntime` is importable, otherwise OCR only. Tests never load
 an installed model (conftest points `MTGSTACK_MODEL` at nothing); they use `recognizer=None` or a fake.
-Not done yet: running the model on the phone (onnxruntime-web), publishing model + index, Lab UI for model vs OCR.
+Phone build: worker.js runs the model with onnxruntime-web (`py/ort-<ver>/`, version pinned in worker.js `ORT` and
+checked by build_pages.py) when `data/model/` is published (`build_pages.py --model DIR`; CI takes it from the GitHub
+release tagged `model`). JS can only be awaited, so the server awaits `app.state.picture_matcher` in `prepare()` and
+passes `Scanner.scan(prepared=...)`. Not done yet: the `model` release, a test on a real phone, new printings in the index.
