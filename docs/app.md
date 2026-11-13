@@ -50,6 +50,14 @@ Needs an Apple Developer Program membership ($99 a year). No Mac is needed: GitH
 The upload job works (first build uploaded 13 Nov 2026, with an Admin team key). Its first step checks the key
 against Apple and says what is wrong with it in a few seconds, before any build time is spent.
 
+### Signing certificates
+
+Each upload runs on a fresh GitHub machine, so Xcode creates a new development certificate every time. An account holds
+only a few; when it is full the archive fails with "Your account has reached the maximum number of certificates". The
+upload job now removes the certificate it created when it finishes. To look or clean up by hand: Actions -> Run
+workflow -> "Apple signing certificates" -> `list` or `revoke-ci` (only development certificates named "Created via
+API" are ever revoked; `scripts/appstore_certs.py`).
+
 ## Not done yet
 
 - The app has not been run on a real iPhone or Android phone, only built. The web variant it packages was checked in a

@@ -229,6 +229,17 @@ jobs:
             -authenticationKeyPath "$RUNNER_TEMP/keys/AuthKey_$KEY_ID.p8" \
             -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID" | tail -40
 
+      # Xcode made a development certificate for this build on a machine that is about to be thrown away. Left alone
+      # they pile up until the account is full and the next archive fails; remove it (scripts/appstore_certs.py).
+      - name: Remove the development certificate this run created
+        if: always()
+        env:
+          KEY_FILE: ${{ runner.temp }}/keys/AuthKey_${{ secrets.APPSTORE_KEY_ID }}.p8
+        run: |
+          if [ -x "$RUNNER_TEMP/venv/bin/python" ] && [ -f "$KEY_FILE" ]; then
+            "$RUNNER_TEMP/venv/bin/python" scripts/appstore_certs.py --revoke-ci || echo "::warning::could not remove the development certificate"
+          fi
+
   # Manual only. Every TestFlight run makes a development certificate on a fresh machine, and the account only holds a
   # few: "list" shows what is there, "revoke-ci" removes the ones CI created (scripts/appstore_certs.py).
   certificates:
