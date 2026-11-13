@@ -146,7 +146,8 @@ export default function Scan() {
       // whatever re-armed it (often a hand on the card) is still in the picture: wait for a fresh steady view
       if (s.armed) s.history = [];
     }
-    if (!auto || !s.armed || !r.corners || steady() < 2) return;
+    // two ready (sharp, uncut) frames in a row that agree on where the card is: it has stopped moving
+    if (!auto || !s.armed || !r.corners || steady() < 1) return;
     s.armed = false; s.last = r.corners; s.thumb = thumb(r.corners);
     await send([await grab()], r.corners);
     s.history = [];
