@@ -135,10 +135,15 @@ export const api = {
   send: (lot: number, b: { qty?: number | null; deck: string | null; board?: string }) => post(`/api/lots/${lot}/send`, b),
   tags: () => get<{ tag: string; lots: number; cards: number }[]>("/api/tags"),
   decks: () => get<Deck[]>("/api/decks"),
+  /** a deck from a decklist; `text` may be empty for a deck to fill by hand */
+  createDeck: (b: { name: string; text: string; format: string; status: "building" | "built" }) =>
+    post<{ slug: string; entries: number; unresolved: string[] }>("/api/decks", b),
   deck: (slug: string, q = "") => get<DeckDetail>(`/api/decks/${slug}?${qs({ q })}`),
   patchDeck: (slug: string, b: Partial<{ status: string; priority: number; name: string; format: string }>) =>
     req("PATCH", `/api/decks/${slug}`, b),
   deleteDeck: (slug: string) => req("DELETE", `/api/decks/${slug}`),
+  /** grow a deck's list to cover the cards tagged into it (after scanning cards into the deck) */
+  deckCover: (slug: string) => post<{ slug: string }>(`/api/decks/${slug}/from-tags?keep=true`),
   pull: (slug: string, prefer = "cheapest") => post<{ pulled: { qty: number }[] }>(`/api/decks/${slug}/pull?${qs({ prefer })}`),
   release: (slug: string) => post(`/api/decks/${slug}/release`),
   exportDeck: (slug: string, fmt: string, source: string) => get<string>(`/api/decks/${slug}/export?${qs({ fmt, source })}`),

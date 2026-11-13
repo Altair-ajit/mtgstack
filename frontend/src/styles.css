@@ -546,3 +546,15 @@ html { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; text-size-adju
   .batch-row { grid-template-columns: 54px minmax(0, 1fr) auto auto; } .batch-row .card-img, .batch-row .card-img.sm { width: 54px; }
   .br-opts select:first-child { min-width: 92px; } .br-opts select { padding: 7px 2px 7px 6px; }
 }
+
+/* never on touch screens (see HoverCard): a tap would leave it floating over the next thing opened */
+@media (hover: none) { .hover-big { display: none; } }
+@media (max-width: 760px) {
+  /* the card view is a sheet over the list, not a page: the list stays visible above it, and it drags down to close */
+  .drawer { height: auto; max-height: 86dvh; transition: transform .2s ease; }
+  .cd-nav { padding-top: 18px; touch-action: none; }
+  .cd-nav::before { content: ""; position: absolute; top: 7px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 4px; background: #cfd5dd; }
+  .cd-nav .cd-close { top: 14px; }
+}
+.deck-new { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; } .deck-new input { flex: 1; min-width: 150px; }
+@media (max-width: 760px) { .drawer { max-height: 80dvh; } }

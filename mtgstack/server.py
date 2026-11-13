@@ -350,8 +350,10 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         return guard(decks.update_deck, conn, slug, body.status, body.priority, body.name, body.format)
 
     @app.post("/api/decks/{slug}/from-tags")
-    def api_deck_from_tags(slug: str, name: str | None = None):
-        return {"slug": guard(decks.deck_from_tags, conn, slug, name)}
+    def api_deck_from_tags(slug: str, name: str | None = None, keep: bool = False):
+        """Rebuild the decklist from the cards tagged into the deck. `keep=true` only grows the list to cover them
+        (what the scanner does after putting cards in a deck), leaving the rest of the list alone."""
+        return {"slug": guard(decks.deck_from_tags, conn, slug, name, keep)}
 
     @app.get("/api/decks/{slug}")
     def api_deck(slug: str, q: str = ""):

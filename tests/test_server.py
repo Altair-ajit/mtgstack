@@ -84,6 +84,13 @@ def test_browse_import_and_lot_endpoints(tmp_path):
     assert [r["name"] for r in blue["rows"]] == ["Counterspell"] and blue["totals"]["cards"] == 3
     lot = blue["rows"][0]["lots"][0]["lot_id"]
     assert c.patch(f"/api/lots/{lot}", json={"qty": 1, "condition": "NM"}).json()["lot"]["condition"] == "NM"
+    # a deck needs only a name: an empty one is filled by hand later
+    empty = c.post("/api/decks", json={"name": "Brew In Progress", "text": "", "format": "commander", "status": "building"}).json()
+    assert (empty["slug"], empty["entries"], empty["unresolved"]) == ("brew-in-progress", 0, [])
+    made = next(d for d in c.get("/api/decks").json() if d["slug"] == "brew-in-progress")
+    assert (made["name"], made["status"], made["wanted"]) == ("Brew In Progress", "building", 0)
+    assert c.get("/api/decks/brew-in-progress").json()["entries"] == []
+    c.delete("/api/decks/brew-in-progress")
     c.post("/api/decks", json={"name": "Deck A", "text": "1 Counterspell"})
     assert c.post("/api/lots/bulk", json={"lot_ids": [lot], "action": "send", "deck": "deck-a"}).status_code == 200
     assert c.get("/api/cards", params={"deck": "deck-a"}).json()["totals"]["cards"] == 1

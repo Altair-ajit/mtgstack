@@ -119,16 +119,28 @@ def import_decklist(conn: sqlite3.Connection, catalog: Catalog, name: str, text:
     return {"slug": slug, "entries": len(parse_decklist(text)), "unresolved": unresolved}
 
 
-def deck_from_tags(conn, slug: str, name: str | None = None) -> str:
-    """Build the decklist from whatever is currently tagged into the deck (e.g. after scanning a deck)."""
-    create_deck(conn, name or slug, slug=slug)
-    conn.execute("DELETE FROM deck_entries WHERE deck_slug=?", (slug,))
+def deck_from_tags(conn, slug: str, name: str | None = None, keep: bool = False) -> str:
+    """Build the decklist from whatever is currently tagged into the deck (e.g. after scanning a deck).
+
+    `keep`: leave the list as it is and only grow it to cover the tagged cards: a card scanned into a deck that is
+    not on its list (always the case for a deck started empty) gets an entry, and a wanted count lower than the
+    copies now in the deck is raised. Nothing is removed and the deck's name and format are untouched."""
+    if not conn.execute("SELECT 1 FROM decks WHERE slug=?", (slug,)).fetchone() or not keep:
+        create_deck(conn, name or slug, slug=slug)
+    if not keep:
+        conn.execute("DELETE FROM deck_entries WHERE deck_slug=?", (slug,))
     for board in BOARDS:
-        for r in conn.execute(
-                "SELECT p.name, p.oracle_id, SUM(l.qty) q FROM lots l JOIN printings p ON p.id=l.printing_id "
-                "JOIN lot_tags t ON t.lot_id=l.id WHERE t.tag=? GROUP BY p.oracle_id", (board_tag(slug, board),)):
-            conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, qty) VALUES (?,?,?,?,?)",
-                         (slug, board, r["name"], r["oracle_id"], r["q"]))
+        tagged = rows(conn.execute(
+            "SELECT p.name, p.oracle_id, SUM(l.qty) q FROM lots l JOIN printings p ON p.id=l.printing_id "
+            "JOIN lot_tags t ON t.lot_id=l.id WHERE t.tag=? GROUP BY p.oracle_id", (board_tag(slug, board),)))
+        for r in tagged:
+            have = conn.execute("SELECT COALESCE(SUM(qty), 0), MIN(id) FROM deck_entries WHERE deck_slug=? AND board=? "
+                                "AND oracle_id=?", (slug, board, r["oracle_id"])).fetchone() if keep else (0, None)
+            if have[1] is None:
+                conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, qty) VALUES (?,?,?,?,?)",
+                             (slug, board, r["name"], r["oracle_id"], r["q"]))
+            elif have[0] < r["q"]:
+                conn.execute("UPDATE deck_entries SET qty = qty + ? WHERE id=?", (r["q"] - have[0], have[1]))
     conn.commit()
     return slug
 

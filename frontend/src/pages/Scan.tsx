@@ -244,10 +244,18 @@ export default function Scan() {
     if (!r.printing_id) return;
     teach(r, fin);
     const out = await api.addLot({ printing_id: r.printing_id, qty: 1, finish: fin, condition, language: r.language, tags });
+    await coverDecks([tags]);
     setLog(l => [{ id: Date.now(), name: r.name || out.name, set: r.set_code || "", finish: fin, lot: out.allocations[0]?.deck ? -1 : out.lot_id,
       allocations: out.allocations }, ...l]);
     toast(out.allocations.length ? `${r.name} → ${out.allocations[0].deck_name} (${out.allocations[0].deck_progress})` : `Added ${r.name}`);
     qc.invalidateQueries();
+  };
+
+  /** Cards put into a deck must show on its list: grow the list of every deck these tags name (decks.deck_from_tags
+   * with keep). A deck started empty from the Deck picker gets its whole list this way. */
+  const coverDecks = async (tagLists: string[][]) => {
+    const slugs = new Set(tagLists.flat().filter(t => t.startsWith("deck:")).map(t => t.split(":")[1]));
+    for (const s of slugs) await api.deckCover(s).catch(() => {});
   };
 
   /** Single mode: another printing of the scanned card was picked, so its prices are needed too. */
@@ -276,6 +284,7 @@ export default function Scan() {
         status: "matched", set_code: i.set_code, number: i.number }));
       const out = await api.importCommit(rows as unknown as ImportRow[], newDeck
         ? { type: "deck", name: newDeck.name, format: newDeck.format, status: "built", owned: true } : { type: "collection", tags: [] });
+      if (!newDeck) await coverDecks(items.map(i => i.tags));
       for (const i of items) {                     // what was kept or corrected teaches the Scanner Lab
         if (!i.scan_id || !i.orig) continue;
         const wrong = i.orig.printing_id !== i.printing_id || i.orig.finish !== i.finish;

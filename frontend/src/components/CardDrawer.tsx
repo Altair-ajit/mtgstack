@@ -29,14 +29,30 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, []);
-  const touch = useRef<{ x: number; y: number } | null>(null);
+  // Phones: the view is a sheet. Sideways swipes step through the list; dragging it down from its bar (or from
+  // the content when that is scrolled to the top) follows the finger and closes it past a third of the way.
+  const drag = useRef<{ x: number; y: number; top: boolean; el: HTMLElement | null } | null>(null);
+  const phone = () => window.matchMedia("(max-width: 760px)").matches;
   const swipe = {
-    onTouchStart: (e: React.TouchEvent) => { touch.current = { x: e.touches[0].clientX, y: e.touches[0].clientY }; },
+    onTouchStart: (e: React.TouchEvent) => {
+      const el = (e.currentTarget as HTMLElement).closest(".drawer") as HTMLElement | null;
+      const inBar = !!(e.target as HTMLElement).closest(".cd-nav");
+      drag.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, top: inBar || !el || el.scrollTop <= 0, el };
+    },
+    onTouchMove: (e: React.TouchEvent) => {
+      const d = drag.current;
+      if (!d || !d.top || !d.el || !phone()) return;
+      const dx = e.touches[0].clientX - d.x, dy = e.touches[0].clientY - d.y;
+      if (dy > 0 && dy > Math.abs(dx)) { d.el.style.transition = "none"; d.el.style.transform = `translateY(${dy}px)`; }
+    },
     onTouchEnd: (e: React.TouchEvent) => {
-      const s = touch.current; touch.current = null;
-      if (!s || (e.target as HTMLElement).closest?.("input, select, textarea, .scroll-x")) return;
-      const dx = e.changedTouches[0].clientX - s.x, dy = e.changedTouches[0].clientY - s.y;
-      if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
+      const d = drag.current; drag.current = null;
+      if (!d) return;
+      if (d.el) { d.el.style.transition = ""; d.el.style.transform = ""; }
+      if ((e.target as HTMLElement).closest?.("input, select, textarea")) return;
+      const dx = e.changedTouches[0].clientX - d.x, dy = e.changedTouches[0].clientY - d.y;
+      if (phone() && d.top && dy > 110 && dy > 2 * Math.abs(dx)) onClose();
+      else if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy)) step(dx < 0 ? 1 : -1);
     },
   };
   // always on screen while the card scrolls under it: where you are in the list, and the way out
@@ -59,15 +75,16 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
     try { await p; toast(ok); refresh(); } catch (e) { toast(String((e as Error).message), "err"); }
   };
 
-  if (isLoading || !data) return <Drawer onClose={onClose}>{navBar}<p className="muted pad">{error ? String(error) : "Loading…"}</p></Drawer>;
+  if (isLoading || !data) return <Drawer onClose={onClose}><div {...swipe}>{navBar}<p className="muted pad">{error ? String(error) : "Loading…"}</p></div></Drawer>;
   const c = data.card;
   const priceRows = ["nonfoil", "foil", "etched"].filter(f => data.prices.some(p => p.finish === f));
   const quote = (f: string, src: string, kind: string) => data.prices.find(p => p.finish === f && p.source === src && p.kind === kind)?.price;
 
   return (
     <Drawer onClose={onClose}>
+      <div className="cd-wrap" {...swipe}>
       {navBar}
-      <div className={`cd ${c.id !== printingId ? "fetching" : ""}`} {...swipe}>
+      <div className={`cd ${c.id !== printingId ? "fetching" : ""}`}>
         <div className="cd-top">
           <CardImg src={c.image_normal} name={c.name} size="lg" />
           <div className="cd-info">
@@ -175,6 +192,7 @@ export default function CardDrawer({ printingId, onClose, ids, onNavigate }: {
             ))}
           </tbody>
         </table>
+      </div>
       </div>
     </Drawer>
   );

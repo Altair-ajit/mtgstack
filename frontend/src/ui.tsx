@@ -59,7 +59,10 @@ export function CardImg({ src, name, size = "sm", onClick }: { src?: string | nu
 export function HoverCard({ small, large, name }: { small?: string | null; large?: string | null; name: string }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   return (
-    <span className="hovercard" onMouseMove={e => setPos({ x: e.clientX, y: e.clientY })} onMouseLeave={() => setPos(null)}>
+    // touch screens fire a mouse move on tap and never a mouse leave: the big picture would stay on top of
+    // whatever opens next. Only devices that can hover get it.
+    <span className="hovercard" onMouseMove={e => window.matchMedia("(hover: hover)").matches && setPos({ x: e.clientX, y: e.clientY })}
+      onMouseLeave={() => setPos(null)} onClick={() => setPos(null)}>
       <CardImg src={small} name={name} />
       {pos && (large || small) && (
         <img className="hover-big" src={large || small || ""} alt=""

@@ -68,6 +68,23 @@ def test_import_reconcile_pull_release_export(conn, cat):
     assert query(conn, "deck:atraxa-superfriends") == []
     assert sum(l["qty"] for l in query(conn, '"Counterspell"')) == 4   # lots merged back, nothing lost
 
+def test_scanning_into_a_deck_grows_its_list(conn, cat):
+    """A deck started empty (or with a list) must show what is scanned into it: its list grows to cover the cards
+    tagged in, and keeps everything else."""
+    slug = decks.create_deck(conn, "Brew", "commander", status="building")
+    col.add(conn, pid(cat, "Sol Ring", "cmm"), 1, "foil", "NM", "en", ["deck:brew"])
+    decks.deck_from_tags(conn, slug, keep=True)
+    rep = decks.reconcile(conn, slug)
+    assert [(e["name"], e["wanted"], e["in_deck"]) for e in rep["entries"]] == [("Sol Ring", 1, 1)]
+    assert (rep["deck"]["name"], rep["deck"]["format"]) == ("Brew", "commander")          # not renamed or reset
+    conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, qty) VALUES (?,?,?,?)", (slug, "main", "Counterspell", 2))
+    col.add(conn, pid(cat, "Sol Ring", "cmm"), 1, "foil", "NM", "en", ["deck:brew"])       # a second copy
+    decks.deck_from_tags(conn, slug, keep=True)
+    decks.deck_from_tags(conn, slug, keep=True)                                             # running it again changes nothing
+    got = {e["name"]: e["wanted"] for e in decks.reconcile(conn, slug)["entries"]}
+    assert got == {"Sol Ring": 2, "Counterspell": 2}
+
+
 def test_deck_from_tags(conn, cat):
     own(conn, cat)
     decks.deck_from_tags(conn, "other")

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { Finish, ImportPreview, ImportRow } from "../api";
@@ -32,6 +32,7 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
   const fileRef = useRef<HTMLInputElement>(null);
   const toast = useToast();
   const qc = useQueryClient();
+  const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
   const nav = useNavigate();
 
   const input = tab === "paste" ? text : file?.text || "";
@@ -75,6 +76,22 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
   if (!preview) {
     // Opened from the Decks page this is "New deck": the name and format come first and the destination is settled.
     const forDeck = dest0 === "deck";
+    // A new deck only needs a name. Without a list it is created empty (in progress, so cards you add later that it
+    // wants go straight in) and filled by hand from the deck page or the collection. A name already in use would
+    // replace that deck's list, so it is refused.
+    const slug = deck.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "deck";
+    const taken = dest === "deck" && !!deck.name.trim() && (decks.data || []).some(d => d.slug === slug);
+    const createEmpty = async () => {
+      setBusy(true);
+      try {
+        const d = await api.createDeck({ name: deck.name.trim(), text: "", format: deck.format, status: "building" });
+        qc.invalidateQueries();
+        toast(`Created ${deck.name.trim()}`);
+        onClose();
+        nav(`/decks/${d.slug}`);
+      } catch (e) { toast(String((e as Error).message), "err"); }
+      setBusy(false);
+    };
     const phone = window.matchMedia("(max-width: 760px)").matches;
     const deckForm = (
               <div className="deck-form">
@@ -89,10 +106,13 @@ export default function ImportDialog({ onClose, dest: dest0 = "collection" }: { 
     return (
       <Modal title={forDeck ? "New deck" : "Import cards"} onClose={onClose} wide footer={<>
         <button onClick={onClose}>Cancel</button>
-        <button className="primary" disabled={!input.trim() || busy} onClick={runPreview}>{busy ? "Reading…" : "Preview import"}</button>
+        {forDeck && !input.trim()
+          ? <button className="primary" disabled={!deck.name.trim() || taken || busy} onClick={createEmpty}>{busy ? "Creating…" : "Create empty deck"}</button>
+          : <button className="primary" disabled={!input.trim() || busy || (forDeck && !deck.name.trim()) || taken} onClick={runPreview}>{busy ? "Reading…" : forDeck ? "Preview decklist" : "Preview import"}</button>}
       </>}>
         {forDeck && deckForm}
-        {forDeck && <h3>The decklist</h3>}
+        {taken && <p className="bad small">You already have a deck with this name. Pick another name.</p>}
+        {forDeck && <h3>The decklist <span className="muted small">(optional: leave it empty to add cards by hand)</span></h3>}
         <div className="tabs">
           <button className={tab === "paste" ? "on" : ""} onClick={() => setTab("paste")}>Paste list</button>
           <button className={tab === "file" ? "on" : ""} onClick={() => setTab("file")}>Upload .txt / .csv</button>
