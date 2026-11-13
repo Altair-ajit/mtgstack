@@ -46,6 +46,12 @@ export async function bootLocal(): Promise<void> {
         else if (m.state === "error") hint(`Scanner couldn't load: ${m.msg}`, 8000);
         else hint("");
       }
+      else if (m.type === "model") {
+        // until it is ready scans only read the text, which is much weaker: say so instead of failing silently
+        if (m.state === "loading" && /\/(scan|lab)/.test(location.pathname)) hint("Loading picture recognition (27 MB, first time only)…");
+        else if (m.state === "error") hint(`Picture recognition couldn't load: ${m.msg}. Scans will only read the text.`, 20000);
+        else hint("");
+      }
       else if (m.type === "ready") ok();
       else if (m.type === "error") { show(`Couldn't start: ${m.msg}`, true); bad(new Error(m.msg)); }
       else if (m.type === "api") {
