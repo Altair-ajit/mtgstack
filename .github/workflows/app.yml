@@ -22,6 +22,12 @@ on:
 permissions:
   contents: read
 
+# An explicit bash makes a failing command fail the step even when its output is piped (to tail): without it a
+# failed xcodebuild export was reported as a green run.
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: app-${{ github.ref }}
   cancel-in-progress: true

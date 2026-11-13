@@ -25,7 +25,9 @@ Needs an Apple Developer Program membership ($99 a year). No Mac is needed: GitH
 1. Enrol at https://developer.apple.com/programs/ (approval can take a day or two).
 2. In App Store Connect (https://appstoreconnect.apple.com): Apps -> + -> New App, platform iOS, bundle ID
    `io.github.altairajit.mtgstack` (register it under Certificates, Identifiers & Profiles first if it is not offered).
-3. Users and Access -> Integrations -> App Store Connect API -> generate a key with the "App Manager" role. Note the
+3. Users and Access -> Integrations -> App Store Connect API -> generate a key with the "Admin" role
+   (Xcode signs the upload with a cloud-managed distribution certificate, which an "App Manager" key may not create: the
+   export then fails with "Cloud signing permission error"). Note the
    Key ID and the Issuer ID and download the `.p8` file (it can only be downloaded once).
 4. In the GitHub repository: Settings -> Secrets and variables -> Actions.
    - Secrets: `APPSTORE_KEY_ID`, `APPSTORE_ISSUER_ID`, `APPSTORE_PRIVATE_KEY` (the whole contents of the `.p8` file).
@@ -34,7 +36,7 @@ Needs an Apple Developer Program membership ($99 a year). No Mac is needed: GitH
 6. When the build finishes processing in App Store Connect, add yourself as an internal tester under TestFlight and
    install it with the TestFlight app.
 
-The upload job has not been run yet (there was no account to try it with): expect to fix a detail or two on the first run.
+First run (13 Nov 2026): the archive step worked; the upload failed because the key had the "App Manager" role.
 
 ## Not done yet
 
