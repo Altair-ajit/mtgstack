@@ -192,10 +192,26 @@ class Scanner:
                 yield card, self._picture_match(card, None, "")
         return _choose(pairs())
 
+    def _pool(self, match, fetch: bool) -> list[dict]:
+        """The catalog's rows for the printings a picture match names. The model's index knows every card, the
+        local catalog may not (card database not downloaded yet, or older than the index): with `fetch`, missing
+        printings are looked up online in one request."""
+        ids = match.printings[:60]
+        have = {i: self.catalog.get(i) for i in ids}
+        missing = [i for i in ids if have[i] is None]
+        if missing and fetch and self.catalog.online:
+            try:
+                self.catalog.lookup_batch([{"id": i} for i in missing])
+                have.update({i: self.catalog.get(i) for i in missing})
+            except Exception as e:                      # offline: carry on with what is known locally
+                import logging
+                logging.getLogger("mtgstack.scanner").info("could not look up matched printings: %s", e)
+        return [have[i] for i in ids if have[i]]
+
     def _decide_by_picture(self, match, cards: list[np.ndarray], res: ScanResult, idx: "NameIndex", debug: bool) -> bool:
         """The picture is a confident match: take the card from it and use the collector line only to choose
         between printings that share the artwork. False = unusable (the catalog doesn't know these printings)."""
-        pool = [p for p in (self.catalog.get(i) for i in match.printings) if p]
+        pool = self._pool(match, fetch=True)
         if not pool:
             return False
         res.markers["model"] = match.to_dict()
@@ -265,7 +281,7 @@ class Scanner:
         """The picture match was not confident enough to decide alone: let it back up or question the OCR result,
         or stand in for it when the text gave nothing solid. Returns the printing to report."""
         res.markers["model"] = match.to_dict()
-        pool = [p for p in (self.catalog.get(i) for i in match.printings) if p]
+        pool = self._pool(match, fetch=match.plausible)
         if not pool:
             return printing
         if printing is not None and printing["oracle_id"] == pool[0]["oracle_id"]:

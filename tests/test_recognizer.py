@@ -264,6 +264,31 @@ def test_server_uses_an_awaited_matcher(tmp_path):
     assert r["name"] == "Iron Gyre" and r["recognizer"] == "model" and r["model_version"] == "js-1" and calls == [1]
 
 
+def test_matched_printings_missing_from_the_catalog_are_fetched(conn):
+    """Card database not downloaded yet: the model still names the card, so look its printings up online."""
+    asked = []
+
+    class Client:
+        def collection(self, identifiers):
+            asked.append(identifiers)
+            return [card("Iron Gyre", "dom", "90")]
+    NameIndex._cache.clear()
+    cat = Catalog(conn, client=Client(), online=True)
+    img = photo(card_image("Xqzv Wkrrt", "QQQ", "999"))
+    r = Scanner(cat, fetch_images=False, recognizer=FakeModel([U("dom/90")])).scan([img])
+    assert r.name == "Iron Gyre" and r.recognizer == "model" and asked == [[{"id": U("dom/90")}]]
+
+    class Offline:
+        def collection(self, identifiers):
+            raise OSError("no network")
+        by_set_cn = named = lambda self, *a, **k: None
+        prints_of = search_all = lambda self, *a, **k: []
+    NameIndex._cache.clear()
+    r = Scanner(Catalog(conn, client=Offline(), online=True), fetch_images=False,
+                recognizer=FakeModel([U("spm/44")])).scan([img])
+    assert r.recognizer == "ocr"                       # nothing to go on: falls back without crashing
+
+
 def test_hints_from_the_caller_and_broken_models(mcat):
     img = photo(card_image("Brass Orrery", "CMR", "358"))
     hints = [{"printing_id": U("roe/101"), "score": 0.91, "group": 1}, {"printing_id": U("cmr/358"), "score": 0.9, "group": 1},
