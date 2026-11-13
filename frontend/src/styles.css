@@ -243,6 +243,35 @@ table.cards.deck td.qtycol { width: 30px; font-weight: 700; } table.cards.deck t
 .cands { display: flex; gap: 6px; flex-wrap: wrap; } .cand { flex-direction: column; padding: 4px; font-size: 11px; } .cand.on { outline: 2px solid var(--blue); }
 .evidence { font-size: 12px; color: var(--muted); padding-left: 18px; }
 .scan-log { padding-left: 20px; line-height: 1.9; } .alloc { color: var(--amber); font-weight: 600; }
+.sr-price { margin-top: 8px; } .sr-price .price { font-size: 22px; }
+/* scan: tags for what is being scanned, and the batch waiting to be added */
+.tagbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.tag-toggle { border-radius: 99px; padding: 4px 11px; font-size: 13px; background: #fff; }
+.tag-toggle.on { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+.tag-toggle.deck:not(.on) { color: var(--blue-d); border-color: #bcd3fb; }
+.tagbar select, .tag-new { padding: 4px 8px; font-size: 13px; } .tag-new { width: 170px; }
+.batch { container-type: inline-size; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); }
+.batch-head { position: sticky; top: 60px; z-index: 5; display: flex; gap: 8px 16px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--line); border-radius: 12px 12px 0 0; }
+.batch-head .actions { margin: 0; } .batch-total { font-size: 15px; }
+.batch-empty { padding: 28px 16px; text-align: center; margin: 0; }
+.batch-miss, .batch-done { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 9px 14px; border-bottom: 1px solid var(--line2); }
+.batch-miss { background: #fff8e6; } .batch-miss .icon { margin-left: auto; } .batch-done { background: #dcf3e5; color: #0f6a3c; }
+.batch-list { list-style: none; margin: 0; padding: 0; }
+.batch-row { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto auto 84px auto; gap: 10px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line2); }
+.batch-row:last-child { border-bottom: 0; } .batch-row .card-img { width: 46px; }
+.batch-row.review { background: #fffbf0; } .batch-row.fresh { animation: fresh 1.2s ease-out; }
+@keyframes fresh { from { background: var(--blue-l); } }
+.br-main { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.br-main > b { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.br-set { border: 0; background: none; padding: 2px 0; font-size: 12.5px; color: var(--blue); max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.br-check { border-color: #f3dfa6; background: #fff3d6; color: #8a5a00; font-size: 12px; font-weight: 600; padding: 2px 8px; }
+.br-tags .chip { cursor: pointer; }
+.br-opts { display: flex; gap: 6px; } .br-opts select { padding: 5px 6px; font-size: 13px; }
+.stepper { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.stepper button { border: 0; border-radius: 0; padding: 5px 10px; font-weight: 700; }
+.stepper input { width: 38px; border: 0; border-left: 1px solid var(--line); border-right: 1px solid var(--line); border-radius: 0; text-align: center; padding: 5px 2px; }
+.br-price { text-align: right; display: flex; flex-direction: column; font-variant-numeric: tabular-nums; }
 
 /* toasts */
 .toasts { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 200; align-items: center; }
@@ -259,7 +288,18 @@ table.cards.deck td.qtycol { width: 30px; font-weight: 700; } table.cards.deck t
   .hide-sm { display: none; } .top { gap: 12px; padding: 0 12px; } .worth { display: none; }
   .scan-grid, .add-body, .dest, .sr { grid-template-columns: 1fr; } .cd-top { flex-direction: column; } .card-img.lg { width: 220px; }
   .page { padding: 12px; }
+  .scan .cam { aspect-ratio: auto; height: 44vh; } .scan .page-head { flex-wrap: wrap; gap: 8px; } .batch-head { top: 52px; }
 }
+/* the batch list sits in a column whose width depends on the page, not the window: two lines per card when narrow */
+@container (max-width: 620px) {
+  .batch-row { grid-template-columns: 40px minmax(0, 1fr) auto auto; padding: 8px 10px; gap: 6px 8px; } .batch-row .card-img { width: 40px; grid-row: span 2; }
+  .batch-row .br-main { grid-column: 2 / 4; } .batch-row > .icon { grid-column: 4; grid-row: 1; justify-self: end; }
+  .batch-row .br-opts { grid-column: 2; min-width: 0; } .batch-row .stepper { grid-column: 3; } .batch-row .br-price { grid-column: 4; }
+  .br-opts select { padding: 5px 2px; min-width: 0; } .stepper button { padding: 5px 8px; } .stepper input { width: 30px; }
+}
+.cam-last { position: absolute; left: 8px; right: 8px; top: 8px; display: flex; gap: 8px; align-items: center; justify-content: space-between;
+  background: rgba(0,0,0,.72); color: #fff; padding: 6px 12px; border-radius: 10px; font-size: 13px; }
+.cam-last span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .cam-last .n { white-space: nowrap; opacity: .85; }
 
 @media (max-width: 600px) {
   .hide-xs { display: none !important; } .show-xs { display: inline-flex !important; }

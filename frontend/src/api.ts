@@ -122,7 +122,8 @@ export const api = {
     get<CardsPage>(`/api/cards?${qs({ q, ...f, sort, page, size, facets })}`),
   card: (id: string) => get<CardDetail>(`/api/card/${id}`),
   names: (text: string) => get<NameHit[]>(`/api/catalog/names?${qs({ text })}`),
-  prints: (name: string) => get<any[]>(`/api/catalog/prints?${qs({ name })}`),
+  /** `complete`: fetch the card's full printing list if the card database isn't downloaded (for pickers) */
+  prints: (name: string, complete = false) => get<any[]>(`/api/catalog/prints?${qs({ name, complete: complete || undefined })}`),
   addLot: (b: { printing_id: string; qty: number; finish: Finish; condition: string; language?: string; tags?: string[] }) =>
     post<{ lot_id: number; name: string; allocations: Allocation[] }>("/api/lots", b),
   patchLot: (id: number, b: Partial<{ qty: number; condition: string; finish: Finish; language: string }>) =>
@@ -130,6 +131,7 @@ export const api = {
   bulk: (b: { lot_ids: number[]; action: "send" | "tag" | "untag" | "remove"; qty?: number | null; deck?: string | null;
     board?: string; tags?: string[] }) => post("/api/lots/bulk", b),
   send: (lot: number, b: { qty?: number | null; deck: string | null; board?: string }) => post(`/api/lots/${lot}/send`, b),
+  tags: () => get<{ tag: string; lots: number; cards: number }[]>("/api/tags"),
   decks: () => get<Deck[]>("/api/decks"),
   deck: (slug: string, q = "") => get<DeckDetail>(`/api/decks/${slug}?${qs({ q })}`),
   patchDeck: (slug: string, b: Partial<{ status: string; priority: number; name: string; format: string }>) =>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, emptyFilters } from "../api";
 import type { CardRow, Filters } from "../api";
 import FilterPanel from "../components/Filters";
@@ -95,6 +95,7 @@ export default function Collection() {
           <button className="filters-btn" onClick={() => setShowFilters(!showFilters)}>
             Filters{Object.values(filters).flat().filter(Boolean).length ? ` (${Object.values(filters).flat().filter(Boolean).length})` : ""}
           </button>
+          <Link className="btn" to="/scan?mode=batch" title="Scan a pile of cards with the camera, check the list, then add them all">📷 Scan cards in</Link>
           <label className="sortsel">Sort <select value={sort} onChange={e => update({ sort: e.target.value })}>
             {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
           <div className="seg">
@@ -125,7 +126,7 @@ export default function Collection() {
         {error && <div className="error-box">{String((error as Error).message)}</div>}
         {data && data.rows.length === 0 && (
           data.totals.cards === 0 && !q && !Object.values(filters).some(v => (Array.isArray(v) ? v.length : v))
-            ? <Empty title="Your collection is empty">Use <b>Import</b> to bring in a TCGplayer export (paste, .txt or .csv), or <b>Add cards</b> to add them one at a time.</Empty>
+            ? <Empty title="Your collection is empty">Use <b>Import</b> to bring in a TCGplayer export (paste, .txt or .csv), <Link to="/scan?mode=batch">scan a pile of cards</Link> with your camera, or <b>Add cards</b> to add them one at a time.</Empty>
             : <Empty title="No cards match">Try clearing a filter or the search.</Empty>
         )}
 

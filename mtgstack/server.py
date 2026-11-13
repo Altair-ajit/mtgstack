@@ -198,8 +198,9 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
 
     # ---- catalog ---------------------------------------------------------------------------
     @app.get("/api/catalog/prints")
-    def api_prints(name: str):
-        return guard(catalog.prints_by_name, name)
+    def api_prints(name: str, complete: bool = False):
+        """`complete=true`: make sure every printing is known (card database not downloaded yet), for a picker."""
+        return guard(catalog.prints_by_name, name, True, complete)
 
     @app.get("/api/catalog/lookup")
     def api_lookup(set_code: str, number: str, lang: str = "en"):
@@ -252,6 +253,10 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         prepared = None if hint_list else await prepare(data, outline)
         res = guard(lambda: Scanner(catalog, fetch_images=online).scan(
             data, hints=hint_list, hints_version=model_version[:60], prepared=prepared, corners=outline)).to_dict()
+        # market price per finish of the printing found, so a scan can be valued without another request
+        res["prices"] = {r[0]: r[1] for r in conn.execute(
+            "SELECT finish, price FROM current_prices WHERE printing_id=? AND source='tcgplayer' AND kind='market'",
+            (res["printing_id"],))} if res.get("printing_id") else {}
         if save:
             res["scan_id"] = scanlab.save(data, res, source=source[:20] or "scan")
         return res

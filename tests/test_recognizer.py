@@ -262,6 +262,7 @@ def test_server_uses_an_awaited_matcher(tmp_path):
     body = cv2.imencode(".jpg", img)[1].tobytes()
     r = TestClient(app).post("/api/scan?save=false", files={"files": ("a.jpg", body, "image/jpeg")}).json()
     assert r["name"] == "Iron Gyre" and r["recognizer"] == "model" and r["model_version"] == "js-1" and calls == [1]
+    assert r["prices"] == {"nonfoil": 1.0}                              # valued without another request
 
 
 def test_matched_printings_missing_from_the_catalog_are_fetched(conn):
@@ -353,6 +354,21 @@ def test_title_is_looked_up_online_when_the_card_database_is_missing(conn):
     r = Scanner(Catalog(conn, client=Down(), online=True), fetch_images=False, recognizer=None).scan(
         [photo(card_image("Iron Gyre", "DOM", "90"))])
     assert r.name is None                              # offline: no guess, no crash
+
+
+def test_a_printing_picker_gets_every_printing_before_the_card_database_is_downloaded(conn):
+    asked = []
+
+    class Client:
+        def prints_of(self, name):
+            asked.append(name)
+            return [card("Iron Gyre", "dom", "90"), card("Iron Gyre", "m21", "7"), card("Iron Gyre", "lea", "3")]
+    upsert_cards(conn, [card("Iron Gyre", "dom", "90")])
+    cat = Catalog(conn, client=Client(), online=True)
+    assert len(cat.prints_by_name("Iron Gyre")) == 1 and not asked            # ordinary lookups stay local
+    assert len(cat.prints_by_name("iron gyre", complete=True)) == 3
+    assert len(cat.prints_by_name("Iron Gyre", complete=True)) == 3 and asked == ["Iron Gyre"]   # fetched once
+    assert len(Catalog(conn, client=Client(), online=False).prints_by_name("Iron Gyre", complete=True)) == 3
 
 
 def test_hints_from_the_caller_and_broken_models(mcat):

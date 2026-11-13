@@ -220,6 +220,7 @@ class Catalog:
     def __init__(self, conn: sqlite3.Connection, client: Scryfall | None = None, online: bool = True):
         self.conn, self.online = conn, online
         self._client = client
+        self._completed: set[str] = set()       # names whose full printing list was fetched (prints_by_name)
 
     @property
     def client(self) -> Scryfall:
@@ -232,10 +233,18 @@ class Catalog:
         r = self.conn.execute("SELECT * FROM printings WHERE id=?", (printing_id,)).fetchone()
         return dict(r) if r else None
 
-    def prints_by_name(self, name: str, fetch: bool = True) -> list[dict]:
+    def prints_by_name(self, name: str, fetch: bool = True, complete: bool = False) -> list[dict]:
+        """`complete`: for choosing among a card's printings. Until the card database is downloaded only the
+        printings met so far are known locally, so the full list is fetched (once per card)."""
         name = name.strip()
         q = "SELECT * FROM printings WHERE name = ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE ORDER BY released_at DESC"
         found = rows(self.conn.execute(q, (name, name + " // %")))
+        if found and complete and fetch and self.online and found[0]["name"] not in self._completed                 and self.conn.execute("SELECT COUNT(*) FROM printings").fetchone()[0] < 20000:
+            cards = self.client.prints_of(found[0]["name"])
+            if cards:
+                upsert_cards(self.conn, cards)
+                self._completed.add(found[0]["name"])
+                return rows(self.conn.execute(q, (name, name + " // %")))
         if found or not (fetch and self.online):
             return found
         card = self.client.named(name)

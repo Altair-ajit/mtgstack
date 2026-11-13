@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, lab } from "../api";
 import CardPicker from "../components/CardPicker";
-import type { Allocation, Finish } from "../api";
+import { BatchRow, itemFor, itemPrice, sameStack } from "../components/ScanBatch";
+import type { BatchItem } from "../components/ScanBatch";
+import TagBar from "../components/TagBar";
+import type { Allocation, Finish, ImportRow } from "../api";
 import { CardImg, COND_LABEL, FINISH_LABEL, Modal, money, useToast } from "../ui";
 
 interface Candidate { printing_id: string; name: string; set_code: string; set_name: string; collector_number: string; finishes: Finish[]; image: string | null; score: number }
@@ -10,13 +14,21 @@ interface ScanResult {
   scan_id?: string; debug?: Record<string, string>; markers?: { title_ocr?: string[]; type_ocr?: string[]; collector_ocr?: string[] };
   printing_id: string | null; name: string | null; set_code: string | null; collector_number: string | null; language: string;
   finish: Finish; finish_confidence: number; confidence: number; candidates: Candidate[]; evidence: string[]; needs_review: boolean;
+  prices?: Partial<Record<Finish, number | null>>;
 }
 interface LogItem { id: number; name: string; set: string; finish: Finish; lot: number; allocations: Allocation[]; kept?: boolean }
 type Track = { found: boolean; corners?: [number, number][]; hint?: string };
+type Mode = "single" | "batch";
+
+const loadBatch = (): BatchItem[] => { try { return JSON.parse(localStorage.getItem("mtg.scan.batch") || "[]"); } catch { return []; } };
 
 export default function Scan() {
   const video = useRef<HTMLVideoElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
+  const [sp, setSp] = useSearchParams();
+  // Batch: scans pile up in an editable list and go into the collection together. Single: look a card up.
+  const mode: Mode = (sp.get("mode") || localStorage.getItem("mtg.scan.mode") || "batch") === "single" ? "single" : "batch";
+  const setMode = (m: Mode) => { localStorage.setItem("mtg.scan.mode", m); setSp({ mode: m }, { replace: true }); setRes(null); };
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [trackOn, setTrackOn] = useState(true);
   const [auto, setAutoState] = useState(localStorage.getItem("mtg.scan.auto") !== "0");
@@ -25,7 +37,15 @@ export default function Scan() {
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<ScanResult | null>(null);
   const [finish, setFinish] = useState<Finish>("nonfoil");
-  const [opts, setOpts] = useState({ condition: "NM", tags: localStorage.getItem("mtg.scan.tags") || "", autoAdd: localStorage.getItem("mtg.scan.autoAdd") === "1" });
+  const [condition, setCondition] = useState("NM");
+  const [tags, setTagsState] = useState<string[]>((localStorage.getItem("mtg.scan.tags") || "").split(/[ ,]+/).filter(Boolean));
+  const setTags = (t: string[]) => { localStorage.setItem("mtg.scan.tags", t.join(" ")); setTagsState(t); };
+  const [items, setItems] = useState<BatchItem[]>(loadBatch);
+  const [fresh, setFresh] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [added, setAdded] = useState<{ cards: number; allocations: Allocation[] } | null>(null);
+  const [byName, setByName] = useState(false);
+  const [namePick, setNamePick] = useState<{ printing_id: string; finish: Finish } | null>(null);
   const [log, setLog] = useState<LogItem[]>([]);
   const [orig, setOrig] = useState<{ printing_id: string | null; finish: Finish } | null>(null);
   const [labelled, setLabelled] = useState<string | null>(null);
@@ -39,6 +59,7 @@ export default function Scan() {
   const thumbCanvas = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => () => stream?.getTracks().forEach(t => t.stop()), [stream]);
+  useEffect(() => { localStorage.setItem("mtg.scan.batch", JSON.stringify(items)); }, [items]);
 
   const start = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -58,29 +79,6 @@ export default function Scan() {
     c.getContext("2d")!.drawImage(v, 0, 0, c.width, c.height);
     c.toBlob(b => ok(b!), "image/jpeg", maxSide ? 0.8 : 0.92);
   });
-
-  // live outline + auto-capture
-  useEffect(() => {
-    if (!stream) return;
-    let alive = true;
-    const loop = async () => {
-      while (alive) {
-        const v = video.current;
-        if (trackOn && v?.videoWidth && !st.current.busy) {
-          st.current.busy = true;
-          try {
-            const r: Track = await api.detect(await grab(640));
-            draw(r);
-            await maybeAuto(r);
-          } catch { /* keep going */ }
-          st.current.busy = false;
-        }
-        await new Promise(r => setTimeout(r, 30));
-      }
-    };
-    loop();
-    return () => { alive = false; };
-  }, [stream, trackOn, auto, opts]); // eslint-disable-line
 
   const draw = (r: Track) => {
     const cv = overlay.current, v = video.current;
@@ -147,13 +145,57 @@ export default function Scan() {
     s.history = [];
   };
 
+  // live outline + auto-capture. The loop outlives renders, so it calls the latest handlers through a ref.
+  const handlers = useRef({ draw, maybeAuto });
+  handlers.current = { draw, maybeAuto };
+  useEffect(() => {
+    if (!stream) return;
+    let alive = true;
+    const loop = async () => {
+      while (alive) {
+        const v = video.current;
+        if (trackOn && v?.videoWidth && !st.current.busy) {
+          st.current.busy = true;
+          try {
+            const r: Track = await api.detect(await grab(640));
+            handlers.current.draw(r);
+            await handlers.current.maybeAuto(r);
+          } catch { /* keep going */ }
+          st.current.busy = false;
+        }
+        await new Promise(r => setTimeout(r, 30));
+      }
+    };
+    loop();
+    return () => { alive = false; };
+  }, [stream, trackOn]);
+
+  /** Put a card on the batch list: another copy of a row already there raises its count. */
+  const stage = (it: BatchItem) => {
+    setAdded(null);
+    setItems(list => {
+      const same = list.find(x => sameStack(x, it));
+      setFresh(same ? same.id : it.id);
+      return same ? [{ ...same, qty: same.qty + it.qty }, ...list.filter(x => x !== same)] : [it, ...list];
+    });
+  };
+  const fromScan = (r: ScanResult): BatchItem => {
+    const c = r.candidates.find(x => x.printing_id === r.printing_id);
+    return {
+      id: Date.now(), printing_id: r.printing_id!, name: r.name || "", set_code: r.set_code || "", set_name: c?.set_name || "",
+      number: r.collector_number || "", image: c?.image ?? null, finish: r.finish, finishes: c?.finishes?.length ? c.finishes : [r.finish],
+      condition, language: r.language, qty: 1, tags: [...tags], prices: r.prices || {}, review: r.needs_review,
+      scan_id: r.scan_id, orig: { printing_id: r.printing_id!, finish: r.finish },
+    };
+  };
+
   const send = async (frames: Blob[], corners?: [number, number][]) => {
     setBusy(true);
     try {
       const r: ScanResult = await api.scan(frames, "scan", corners);
       if (corners && r.printing_id) navigator.vibrate?.(40);
       setRes(r); setFinish(r.finish); setOrig({ printing_id: r.printing_id, finish: r.finish }); setLabelled(null);
-      if (opts.autoAdd && r.printing_id && !r.needs_review) await add(r, r.finish);
+      if (mode === "batch" && r.printing_id) stage(fromScan(r));
     } catch (e) { toast(String((e as Error).message), "err"); }
     setBusy(false);
   };
@@ -178,25 +220,70 @@ export default function Scan() {
   const add = async (r: ScanResult, fin: Finish) => {
     if (!r.printing_id) return;
     teach(r, fin);
-    localStorage.setItem("mtg.scan.tags", opts.tags);
-    const out = await api.addLot({ printing_id: r.printing_id, qty: 1, finish: fin, condition: opts.condition, language: r.language,
-      tags: opts.tags.split(/[ ,]+/).filter(Boolean) });
+    const out = await api.addLot({ printing_id: r.printing_id, qty: 1, finish: fin, condition, language: r.language, tags });
     setLog(l => [{ id: Date.now(), name: r.name || out.name, set: r.set_code || "", finish: fin, lot: out.allocations[0]?.deck ? -1 : out.lot_id,
       allocations: out.allocations }, ...l]);
     toast(out.allocations.length ? `${r.name} → ${out.allocations[0].deck_name} (${out.allocations[0].deck_progress})` : `Added ${r.name}`);
     qc.invalidateQueries();
   };
 
+  /** Single mode: another printing of the scanned card was picked, so its prices are needed too. */
+  const pickCandidate = async (r: ScanResult, c: Candidate) => {
+    setRes({ ...r, printing_id: c.printing_id, set_code: c.set_code, collector_number: c.collector_number, name: c.name, prices: {} });
+    try {
+      const p = (await api.card(c.printing_id)).printings.find(x => x.printing_id === c.printing_id);
+      if (p) setRes(cur => (cur && cur.printing_id === c.printing_id ? { ...cur, prices: { nonfoil: p.price, foil: p.price_foil } } : cur));
+    } catch { /* price stays unknown */ }
+  };
+
+  const count = items.reduce((n, i) => n + i.qty, 0);
+  const value = items.reduce((n, i) => n + (itemPrice(i) || 0) * i.qty, 0);
+  const patch = (id: number, p: Partial<BatchItem>) => setItems(list => {
+    const next = list.map(i => (i.id === id ? { ...i, ...p, id } : i));
+    const me = next.find(i => i.id === id)!;
+    const twin = next.find(i => i.id !== id && sameStack(i, me));      // an edit made two rows identical: one row
+    return twin ? next.filter(i => i !== twin).map(i => (i === me ? { ...me, qty: me.qty + twin.qty } : i)) : next;
+  });
+  const commit = async () => {
+    setSaving(true);
+    try {
+      const rows = items.map(i => ({ printing_id: i.printing_id, qty: i.qty, finish: i.finish, condition: i.condition,
+        language: i.language, tags: i.tags, include: true }));
+      const out = await api.importCommit(rows as unknown as ImportRow[], { type: "collection", tags: [] });
+      for (const i of items) {                     // what was kept or corrected teaches the Scanner Lab
+        if (!i.scan_id || !i.orig) continue;
+        const wrong = i.orig.printing_id !== i.printing_id || i.orig.finish !== i.finish;
+        lab.label(i.scan_id, wrong ? { verdict: "wrong", printing_id: i.printing_id, finish: i.finish } : { verdict: "correct", finish: i.finish }).catch(() => {});
+      }
+      setItems([]); setRes(null); setAdded({ cards: out.cards, allocations: out.allocations || [] });
+      toast(`Added ${out.cards} card${out.cards === 1 ? "" : "s"} to your collection`);
+      qc.invalidateQueries();
+    } catch (e) { toast(String((e as Error).message), "err"); }
+    setSaving(false);
+  };
+
+  const price = res?.prices?.[finish];
   return (
     <div className="page">
       <main className="content wide scan">
-        <div className="page-head"><div><h1>Scan cards</h1><div className="muted">Any angle works. Set code, number, language and foil come from the card's printed markers.</div></div></div>
+        <div className="page-head">
+          <div><h1>Scan cards</h1><div className="muted">{mode === "batch"
+            ? "Scan a pile: cards collect in a list you can correct, then add them all at once."
+            : "Check a card's printing and price. Add it to your collection only if you want to."}</div></div>
+          <div className="seg" role="tablist">
+            <button role="tab" aria-selected={mode === "batch"} className={mode === "batch" ? "on" : ""} onClick={() => setMode("batch")}>Scan a batch</button>
+            <button role="tab" aria-selected={mode === "single"} className={mode === "single" ? "on" : ""} onClick={() => setMode("single")}>Price check</button>
+          </div>
+        </div>
         <div className="scan-grid">
           <div>
             <div className={`cam ${stream ? "" : "off"}`}>
               <video ref={video} playsInline autoPlay muted />
               <canvas ref={overlay} />
-              {stream && hint && <div className="cam-hint">{hint}</div>}
+              {stream && mode === "batch" && items[0] && <div className="cam-last">
+                <span>✓ <b>{items[0].name}</b> {items[0].set_code.toUpperCase()} · {money(itemPrice(items[0]))}</span>
+                <span className="n">{count} cards · {money(value)}</span></div>}
+              {stream && (busy || hint) && <div className={`cam-hint ${busy ? "busy" : ""}`}>{busy ? "Reading the card…" : hint}</div>}
               {!stream && <div className="cam-off"><button className="primary" onClick={start}>Start camera</button><div className="muted small">or upload a photo below</div></div>}
             </div>
             <div className="actions">
@@ -205,89 +292,133 @@ export default function Scan() {
               <label className="btn">Upload photo<input type="file" accept="image/*" capture="environment" multiple hidden onChange={e => e.target.files && send([...e.target.files])} /></label>
             </div>
             <div className="actions">
-              <label className="check"><input type="checkbox" checked={trackOn} onChange={e => setTrackOn(e.target.checked)} /> Outline the card</label>
               <label className="check"><input type="checkbox" checked={auto} onChange={e => setAuto(e.target.checked)} /> Auto-capture when steady</label>
-              <label className="check"><input type="checkbox" checked={opts.autoAdd} onChange={e => { localStorage.setItem("mtg.scan.autoAdd", e.target.checked ? "1" : "0"); setOpts({ ...opts, autoAdd: e.target.checked }); }} /> Auto-add confident scans</label>
-            </div>
-            <div className="actions">
-              <label>Condition <select value={opts.condition} onChange={e => setOpts({ ...opts, condition: e.target.value })}>
+              <label className="check"><input type="checkbox" checked={trackOn} onChange={e => setTrackOn(e.target.checked)} /> Outline the card</label>
+              <label>Condition <select value={condition} onChange={e => setCondition(e.target.value)}>
                 {Object.entries(COND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-              <label>Location tag <input value={opts.tags} placeholder="e.g. box:bulk-1" onChange={e => setOpts({ ...opts, tags: e.target.value })} /></label>
             </div>
+            <TagBar active={tags} onChange={setTags} />
           </div>
 
           <div>
-            <div className="scan-result">
-              {busy && <p className="muted">Reading markers…</p>}
-              {!busy && !res && <p className="muted">Scan a card to see what was read.</p>}
-              {!busy && res && (res.printing_id ? (
-                <div className="sr">
-                  <CardImg src={res.candidates.find(c => c.printing_id === res.printing_id)?.image} name={res.name || ""} size="md" />
-                  <div>
-                    <h2>{res.name}</h2>
-                    <div><span className="setcode">{res.set_code?.toUpperCase()}</span> #{res.collector_number} · {res.language}
-                      <span className={`conf ${res.confidence >= 0.9 ? "hi" : res.confidence >= 0.6 ? "mid" : "lo"}`}>{Math.round(res.confidence * 100)}% sure</span></div>
-                    <div className="actions">
-                      <select value={finish} onChange={e => setFinish(e.target.value as Finish)}>
-                        {["nonfoil", "foil", "etched"].map(f => <option key={f} value={f}>{FINISH_LABEL[f]}</option>)}
-                      </select>
-                      <span className={`conf ${res.finish_confidence >= 0.9 ? "hi" : res.finish_confidence >= 0.6 ? "mid" : "lo"}`}>finish {Math.round(res.finish_confidence * 100)}%</span>
-                      <button className="primary" onClick={() => add(res, finish)}>Add to collection</button>
-                    </div>
-                    {res.scan_id && (
-                      <div className="actions teach">
-                        {labelled === res.scan_id ? <span className="muted small">✓ saved to Scanner Lab</span> : <>
-                          <span className="muted small">Was it right?</span>
-                          <button className="small" onClick={() => { teach(res, finish); toast("Thanks — recorded as right"); }}>✓ Right</button>
-                          <button className="small danger" onClick={() => setFixing(true)}>✗ Wrong — fix it</button>
-                        </>}
-                      </div>
-                    )}
-                    {res.candidates.length > 1 && (
-                      <div className="cands">
-                        {res.candidates.slice(0, 10).map(c => (
-                          <button key={c.printing_id} className={`cand ${c.printing_id === res.printing_id ? "on" : ""}`}
-                            onClick={() => setRes({ ...res, printing_id: c.printing_id, set_code: c.set_code, collector_number: c.collector_number, name: c.name })}>
-                            <CardImg src={c.image} name={c.set_code} /><span>{c.set_code.toUpperCase()} #{c.collector_number}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <details><summary className="muted small">How it decided</summary>
-                      {res.debug && <div className="readings compact">
-                        {([["title", "Title", res.markers?.title_ocr], ["type_line", "Type line", res.markers?.type_ocr], ["collector", "Bottom-left", res.markers?.collector_ocr]] as const).map(([k, l, t]) =>
-                          <div key={k} className="reading"><div className="muted small">{l}</div><img src={res.debug![k]} alt={l} />
-                            <div className="ocr">{t?.length ? t.map((x, i) => <code key={i}>{x}</code>) : <span className="muted small">nothing legible</span>}</div></div>)}
-                      </div>}
-                      <ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></details>
+            {mode === "batch" && (
+              <div className="batch">
+                <div className="batch-head">
+                  <div className="batch-total"><b>{count}</b> card{count === 1 ? "" : "s"} · {items.length} unique · <b className="price">{money(value)}</b></div>
+                  <div className="actions">
+                    <button onClick={() => setByName(true)}>+ Add by name</button>
+                    <button className="link danger" disabled={!items.length} onClick={() => confirm(`Discard the ${count} scanned cards?`) && setItems([])}>Clear</button>
+                    <button className="primary" disabled={!items.length || saving} onClick={commit}>{saving ? "Adding…" : `Add ${count || ""} to collection`}</button>
                   </div>
                 </div>
-              ) : (
-                <div><h3>Couldn't identify this card</h3>
-                  {res.scan_id && <button className="small" onClick={() => setFixing(true)}>Tell it what this card is</button>}<ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
-                  <p className="muted">Try better light and fill more of the frame, or use Add cards.</p></div>
-              ))}
-            </div>
-            <h3>This session <span className="muted">({log.length})</span></h3>
-            <ol className="scan-log">
-              {log.map(l => (
-                <li key={l.id}>
-                  <b>{l.name}</b> <span className="setcode">{l.set.toUpperCase()}</span> {l.finish !== "nonfoil" && <span className="badge foil">{FINISH_LABEL[l.finish]}</span>}
-                  {l.allocations.length > 0 && !l.kept ? <>
-                    <span className="alloc"> → {l.allocations[0].deck_name} ({l.allocations[0].deck_progress})</span>
-                    <button className="small link" onClick={async () => {
-                      const lots = await api.cards(l.name, { set: [], rarity: [], color: [], type: [], finish: [l.finish], condition: [], language: [], tag: [], deck: l.allocations[0].deck, min_price: "", max_price: "" }, "added", 1, 5, false);
-                      const lot = lots.rows[0]?.lots[0];
-                      if (lot) { await api.send(lot.lot_id, { qty: 1, deck: null }); setLog(x => x.map(y => (y.id === l.id ? { ...y, kept: true } : y))); qc.invalidateQueries(); toast("Kept in collection"); }
-                    }}>keep in collection instead</button>
-                  </> : <span className="muted"> → collection</span>}
-                </li>
-              ))}
-            </ol>
-            {(decks.data || []).some(d => d.status === "building") && <p className="hint">In-progress decks: {(decks.data || []).filter(d => d.status === "building").map(d => `${d.name} ${d.progress}`).join(" · ")} · total {money((decks.data || []).filter(d => d.status === "building").reduce((n, d) => n + d.missing_cost, 0))} left to buy</p>}
+                {res && !res.printing_id && !busy && (
+                  <div className="batch-miss">
+                    <span><b>Couldn't identify that card.</b> Try again with better light, or</span>
+                    <button className="link" onClick={() => setByName(true)}>add it by name</button>
+                    <button className="icon" onClick={() => setRes(null)} aria-label="Dismiss">×</button>
+                  </div>
+                )}
+                {added && (
+                  <div className="batch-done">✓ Added {added.cards} card{added.cards === 1 ? "" : "s"}.
+                    {added.allocations.length > 0 && ` ${added.allocations.reduce((n, a) => n + a.qty, 0)} went to in-progress decks.`}
+                    {" "}<Link to="/?sort=added">View in collection</Link></div>
+                )}
+                {items.length === 0 && !added && <p className="muted batch-empty">Scanned cards collect here. Nothing goes into your collection until you press Add.</p>}
+                <ul className="batch-list">
+                  {items.map(i => <BatchRow key={i.id} item={i} fresh={i.id === fresh} onChange={p => patch(i.id, p)}
+                    onRemove={() => setItems(list => list.filter(x => x.id !== i.id))} />)}
+                </ul>
+              </div>
+            )}
+
+            {mode === "single" && <>
+              <div className="scan-result">
+                {busy && <p className="muted">Reading the card…</p>}
+                {!busy && !res && <p className="muted">Scan a card to see its printing and price.</p>}
+                {!busy && res && (res.printing_id ? (
+                  <div className="sr">
+                    <CardImg src={res.candidates.find(c => c.printing_id === res.printing_id)?.image} name={res.name || ""} size="md" />
+                    <div>
+                      <h2>{res.name}</h2>
+                      <div><span className="setcode">{res.set_code?.toUpperCase()}</span> #{res.collector_number} · {res.language}
+                        <span className={`conf ${res.confidence >= 0.9 ? "hi" : res.confidence >= 0.6 ? "mid" : "lo"}`}>{Math.round(res.confidence * 100)}% sure</span></div>
+                      <div className="sr-price"><b className="price">{money(price)}</b> <span className="muted small">market, {FINISH_LABEL[finish]}</span></div>
+                      <div className="actions">
+                        <select value={finish} onChange={e => setFinish(e.target.value as Finish)}>
+                          {["nonfoil", "foil", "etched"].map(f => <option key={f} value={f}>{FINISH_LABEL[f]}</option>)}
+                        </select>
+                        <span className={`conf ${res.finish_confidence >= 0.9 ? "hi" : res.finish_confidence >= 0.6 ? "mid" : "lo"}`}>finish {Math.round(res.finish_confidence * 100)}%</span>
+                        <button className="primary" onClick={() => add(res, finish)}>Add to collection</button>
+                      </div>
+                      {res.scan_id && (
+                        <div className="actions teach">
+                          {labelled === res.scan_id ? <span className="muted small">✓ saved to Scanner Lab</span> : <>
+                            <span className="muted small">Was it right?</span>
+                            <button className="small" onClick={() => { teach(res, finish); toast("Thanks — recorded as right"); }}>✓ Right</button>
+                            <button className="small danger" onClick={() => setFixing(true)}>✗ Wrong — fix it</button>
+                          </>}
+                        </div>
+                      )}
+                      {res.candidates.length > 1 && (
+                        <div className="cands">
+                          {res.candidates.slice(0, 10).map(c => (
+                            <button key={c.printing_id} className={`cand ${c.printing_id === res.printing_id ? "on" : ""}`} onClick={() => pickCandidate(res, c)}>
+                              <CardImg src={c.image} name={c.set_code} /><span>{c.set_code.toUpperCase()} #{c.collector_number}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <details><summary className="muted small">How it decided</summary>
+                        {res.debug && <div className="readings compact">
+                          {([["title", "Title", res.markers?.title_ocr], ["type_line", "Type line", res.markers?.type_ocr], ["collector", "Bottom-left", res.markers?.collector_ocr]] as const).map(([k, l, t]) =>
+                            <div key={k} className="reading"><div className="muted small">{l}</div><img src={res.debug![k]} alt={l} />
+                              <div className="ocr">{t?.length ? t.map((x, i) => <code key={i}>{x}</code>) : <span className="muted small">nothing legible</span>}</div></div>)}
+                        </div>}
+                        <ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></details>
+                    </div>
+                  </div>
+                ) : (
+                  <div><h3>Couldn't identify this card</h3>
+                    {res.scan_id && <button className="small" onClick={() => setFixing(true)}>Tell it what this card is</button>}<ul className="evidence">{res.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul>
+                    <p className="muted">Try better light and fill more of the frame, or use Add cards.</p></div>
+                ))}
+              </div>
+              {log.length > 0 && <>
+                <h3>Added this session <span className="muted">({log.length})</span></h3>
+                <ol className="scan-log">
+                  {log.map(l => (
+                    <li key={l.id}>
+                      <b>{l.name}</b> <span className="setcode">{l.set.toUpperCase()}</span> {l.finish !== "nonfoil" && <span className="badge foil">{FINISH_LABEL[l.finish]}</span>}
+                      {l.allocations.length > 0 && !l.kept ? <>
+                        <span className="alloc"> → {l.allocations[0].deck_name} ({l.allocations[0].deck_progress})</span>
+                        <button className="small link" onClick={async () => {
+                          const lots = await api.cards(l.name, { set: [], rarity: [], color: [], type: [], finish: [l.finish], condition: [], language: [], tag: [], deck: l.allocations[0].deck, min_price: "", max_price: "" }, "added", 1, 5, false);
+                          const lot = lots.rows[0]?.lots[0];
+                          if (lot) { await api.send(lot.lot_id, { qty: 1, deck: null }); setLog(x => x.map(y => (y.id === l.id ? { ...y, kept: true } : y))); qc.invalidateQueries(); toast("Kept in collection"); }
+                        }}>keep in collection instead</button>
+                      </> : <span className="muted"> → collection</span>}
+                    </li>
+                  ))}
+                </ol>
+              </>}
+            </>}
+            {(decks.data || []).some(d => d.status === "building") && <p className="hint">In-progress decks claim new cards they need: {(decks.data || []).filter(d => d.status === "building").map(d => `${d.name} ${d.progress}`).join(" · ")} · total {money((decks.data || []).filter(d => d.status === "building").reduce((n, d) => n + d.missing_cost, 0))} left to buy</p>}
           </div>
         </div>
       </main>
+      {byName && (
+        <Modal title="Add a card by name" wide onClose={() => { setByName(false); setNamePick(null); }} footer={<>
+          <button onClick={() => { setByName(false); setNamePick(null); }}>Cancel</button>
+          <button className="primary" disabled={!namePick} onClick={async () => {
+            if (!namePick) return;
+            try { stage(await itemFor(namePick.printing_id, namePick.finish, { condition, tags: [...tags] })); setRes(null); }
+            catch (e) { toast(String((e as Error).message), "err"); }
+            setByName(false); setNamePick(null);
+          }}>Add to batch</button>
+        </>}>
+          <CardPicker initial={res && !res.printing_id ? res.markers?.title_ocr?.[0] || "" : ""} onPick={setNamePick} />
+        </Modal>
+      )}
       {fixing && res && (
         <Modal title="What card is it really?" wide onClose={() => { setFixing(false); setFixPick(null); }} footer={<>
           <button onClick={() => { setFixing(false); setFixPick(null); }}>Cancel</button>

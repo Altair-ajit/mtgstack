@@ -28,7 +28,7 @@ export default function CardPicker({ initial = "", onPick, autoFocus = true }: {
 
   const pickName = async (n: string) => {
     setName(n); setHits([]);
-    const ps = await api.prints(n);
+    const ps = await api.prints(n, true);
     if (!ps.length) return;
     const det = await api.card(ps[0].id);
     setPrints(det.printings); setSel(null);
