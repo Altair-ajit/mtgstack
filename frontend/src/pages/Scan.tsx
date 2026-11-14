@@ -18,6 +18,12 @@ interface ScanResult {
 }
 interface LogItem { id: number; name: string; set: string; finish: Finish; lot: number; allocations: Allocation[]; kept?: boolean }
 type Track = { found: boolean; corners?: [number, number][]; hint?: string; sig?: number[][] };
+// Tracker pace: frames start this far apart (with at least REST_MS idle between them)
+const FAST_MS = 140, REST_MS = 50;       // a card may be on its way: about 7 looks a second
+const HELD_MS = 280;                     // the card just scanned is still lying there
+const SLOW_MS = 600, SLOW_AFTER_MS = 4000;   // no card for a few seconds
+const IDLE_MS = 90000;                   // no card for this long: the camera is switched off until asked for again
+
 type Mode = "single" | "batch";
 
 const loadBatch = (): BatchItem[] => { try { return JSON.parse(localStorage.getItem("mtg.scan.batch") || "[]"); } catch { return []; } };
@@ -67,7 +73,7 @@ export default function Scan() {
   const toast = useToast();
   const qc = useQueryClient();
   const st = useRef({ history: [] as ([number, number][] | null)[], armed: true, busy: false, away: 0,
-    sig: null as number[][] | null });
+    sig: null as number[][] | null, seen: Date.now() });
 
   useEffect(() => () => stream?.getTracks().forEach(t => t.stop()), [stream]);
   useEffect(() => { localStorage.setItem("mtg.scan.batch", JSON.stringify(items)); }, [items]);
@@ -80,7 +86,8 @@ export default function Scan() {
     if (!navigator.mediaDevices?.getUserMedia) {
       setCamErr("The live camera needs HTTPS on a phone: run ./run.sh --phone, or use Upload."); return;
     }
-    setCamErr("");
+    setCamErr(""); setIdle(false);
+    st.current.seen = Date.now();
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1440 } } });
       if (!here.current) { s.getTracks().forEach(t => t.stop()); return; }      // left the screen while it was starting
@@ -95,6 +102,21 @@ export default function Scan() {
     }
   };
   useEffect(() => { here.current = true; start(); return () => { here.current = false; }; }, []); // eslint-disable-line
+  // The camera and the tracker are the costly part of the app (they are what warms a phone), so they only run while
+  // they are of use: not behind another app or tab, and not after a long time with no card in front of the camera.
+  const [idle, setIdle] = useState(false);
+  const halt = () => { if (video.current) video.current.srcObject = null; setStream(null); setHint(""); };
+  const live = useRef<MediaStream | null>(null);
+  live.current = stream;
+  useEffect(() => {
+    let resume = false;
+    const vis = () => {
+      if (document.visibilityState === "hidden") { if (live.current) { resume = true; halt(); } }
+      else if (resume) { resume = false; start(); }
+    };
+    document.addEventListener("visibilitychange", vis);
+    return () => document.removeEventListener("visibilitychange", vis);
+  }, []); // eslint-disable-line
 
   // One canvas per size, reused: the tracker grabs a frame several times a second, and phones (iOS above all) cap
   // the memory of all live canvases. Past the cap new ones silently draw blank, i.e. "no card" for ever.
@@ -179,6 +201,8 @@ export default function Scan() {
         // keep "looking" at it.
         if (!cam || cam.readyState === "ended") { setHint("The camera stopped"); setStream(null); return; }
         if (v && v.paused) v.play().catch(() => {});
+        const t0 = Date.now();
+        let every = FAST_MS;
         if (cam.muted) setHint("The camera is paused by the device. Bring this page to the front.");
         else if (trackOn && v?.videoWidth && !st.current.busy) {
           st.current.busy = true;
@@ -186,10 +210,17 @@ export default function Scan() {
             const r: Track = await api.detect(await grab(640));
             handlers.current.draw(r);
             await handlers.current.maybeAuto(r);
+            if (r.found) st.current.seen = Date.now();
+            // nothing to hurry for: no card for a while, or the card in view is the one just scanned
+            if (Date.now() - st.current.seen > SLOW_AFTER_MS) every = SLOW_MS;
+            else if (r.found && !st.current.armed && !st.current.away) every = HELD_MS;
           } catch (e) { setHint(`The scanner isn't responding: ${(e as Error).message}`); }
           st.current.busy = false;
+          if (Date.now() - st.current.seen > IDLE_MS) { setIdle(true); halt(); return; }
         }
-        await new Promise(r => setTimeout(r, 30));
+        // a fixed pace, and always a rest between frames: looking again the moment a frame is done kept a
+        // phone's processor busy all the time
+        await new Promise(r => setTimeout(r, Math.max(REST_MS, every - (Date.now() - t0))));
       }
     };
     loop();
@@ -313,7 +344,9 @@ export default function Scan() {
                 <span>✓ <b>{items[0].name}</b> {items[0].set_code.toUpperCase()} · {money(itemPrice(items[0]))}</span>
                 <span className="n">{count} cards · {money(value)}</span></div>}
               {stream && (busy || hint) && <div className={`cam-hint ${busy ? "busy" : ""}`}>{busy ? "Reading the card…" : hint}</div>}
-              {!stream && (camErr
+              {!stream && (idle
+                ? <div className="cam-off"><div className="cam-err">Camera paused to save battery: no card for a while.</div><button className="primary" onClick={start}>Resume</button></div>
+                : camErr
                 ? <div className="cam-off"><div className="cam-err">{camErr}</div><button onClick={start}>Try again</button><div className="muted small">or upload a photo below</div></div>
                 : <div className="cam-off"><div className="muted">Starting the camera…</div></div>)}
             </div>
