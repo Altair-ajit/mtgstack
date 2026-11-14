@@ -239,12 +239,23 @@ def connect(path: str | os.PathLike | None = None, catalog: str | os.PathLike | 
         conn.execute("ATTACH DATABASE ? AS cat", (str(catalog),))
         if os.environ.get("MTGSTACK_BROWSER"):
             conn.execute("PRAGMA cat.journal_mode=MEMORY")
+            conn.execute("PRAGMA cat.cache_size=-16000")     # 16 MB of catalog pages stay in memory between queries
         cat_ddl, user_ddl = _split_ddl(TABLES)
         conn.executescript("PRAGMA foreign_keys = ON;" + cat_ddl + user_ddl)
         conn.execute("ALTER TABLE cat.printings ADD COLUMN image_small TEXT") if not any(
             r[1] == "image_small" for r in conn.execute("PRAGMA cat.table_info(printings)")) else None
         add_user_cols(conn)
         views = VIEWS.replace("CREATE VIEW", "CREATE TEMP VIEW")   # temp views may span attached files
+        # The collection reads its cards' details from a copy kept in the user file (see sync_owned), not from the
+        # attached catalog: there every owned card is a lookup somewhere in a 200 MB file, which in the browser
+        # build made one page of the collection take many seconds.
+        _own_tables(conn)
+        owned = "FROM lots l JOIN printings p ON p.id = l.printing_id"
+        assert views.count(owned) == 3
+        views = views.replace(owned, "FROM lots l JOIN own_printings p ON p.id = l.printing_id")
+        prices = "LEFT JOIN current_prices cp ON cp.printing_id = l.printing_id"
+        assert views.count(prices) == 1
+        views = views.replace(prices, "LEFT JOIN own_prices cp ON cp.printing_id = l.printing_id")
     else:
         _migrate(conn)
         conn.executescript(TABLES)
@@ -254,7 +265,57 @@ def connect(path: str | os.PathLike | None = None, catalog: str | os.PathLike | 
     for (name,) in conn.execute("SELECT name FROM sqlite_temp_master WHERE type='view'").fetchall():
         conn.execute(f"DROP VIEW IF EXISTS temp.{name}")
     conn.executescript(views)
+    if catalog:
+        sync_owned(conn)
+        conn.commit()
     return conn
+
+
+# ---- split layout: the owned cards' catalog rows, copied into the user file ---------------------------------------------
+def _own_tables(conn: sqlite3.Connection) -> None:
+    """own_printings / own_prices mirror the catalog's printings / current_prices for the printings you own. They are a
+    cache: rebuilt from scratch whenever the catalog's columns change."""
+    for own, src, key in (("own_printings", "printings", "id"), ("own_prices", "current_prices", "printing_id, finish, source, kind")):
+        want = [r[1] for r in conn.execute(f"PRAGMA cat.table_info({src})")]
+        have = [r[1] for r in conn.execute(f"PRAGMA main.table_info({own})")]
+        if have != want:
+            conn.execute(f"DROP TABLE IF EXISTS main.{own}")
+            conn.execute(f"CREATE TABLE main.{own} AS SELECT * FROM cat.{src} WHERE 0")
+        conn.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS main.ix_{own} ON {own}({key})")
+
+
+def is_split(conn: sqlite3.Connection) -> bool:
+    return any(r[1] == "cat" for r in conn.execute("PRAGMA database_list"))
+
+
+def copy_owned(conn: sqlite3.Connection, ids) -> None:
+    """Copy these printings (and their prices) from the catalog into the user file. No-op in the one-file layout."""
+    ids = list(dict.fromkeys(ids))
+    if not ids or not is_split(conn):
+        return
+    for i in range(0, len(ids), 400):
+        chunk = ids[i:i + 400]
+        marks = ",".join("?" * len(chunk))
+        conn.execute(f"INSERT OR REPLACE INTO main.own_printings SELECT * FROM cat.printings WHERE id IN ({marks})", chunk)
+        conn.execute(f"DELETE FROM main.own_prices WHERE printing_id IN ({marks})", chunk)
+        conn.execute(f"INSERT INTO main.own_prices SELECT * FROM cat.current_prices WHERE printing_id IN ({marks})", chunk)
+
+
+def sync_owned(conn: sqlite3.Connection, refresh: bool = False) -> int:
+    """Make the copy cover every printing in the collection. Normally only the missing ones are fetched (none, after
+    the first time); `refresh` re-reads them all, for when the catalog was replaced by a newer one (new prices).
+    Returns how many printings were copied."""
+    if not is_split(conn):
+        return 0
+    if refresh:
+        ids = [r[0] for r in conn.execute("SELECT DISTINCT printing_id FROM main.lots")]
+        conn.execute("DELETE FROM main.own_printings WHERE id NOT IN (SELECT printing_id FROM main.lots)")
+        conn.execute("DELETE FROM main.own_prices WHERE printing_id NOT IN (SELECT printing_id FROM main.lots)")
+    else:
+        ids = [r[0] for r in conn.execute("SELECT DISTINCT printing_id FROM main.lots WHERE printing_id NOT IN "
+                                          "(SELECT id FROM main.own_printings)")]
+    copy_owned(conn, ids)
+    return len(ids)
 
 
 def add_user_cols(conn: sqlite3.Connection) -> None:

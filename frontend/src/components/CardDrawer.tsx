@@ -4,6 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { api } from "../api";
 import type { Allocation, Finish } from "../api";
+import MoveSheet from "./MoveSheet";
+import type { MoveItem } from "./MoveSheet";
 import { CardImg, COND_LABEL, Drawer, FINISH_LABEL, FinishBadge, Mana, money, Rarity, TagChip, useToast } from "../ui";
 
 export function allocationText(a: Allocation[]) {
@@ -127,8 +129,8 @@ function CardBody({ printingId, onClose, preview }: {
   const qc = useQueryClient();
   const toast = useToast();
   const { data, error } = useQuery({ queryKey: ["card", printingId], queryFn: () => api.card(printingId), staleTime: 30_000 });
-  const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
   const [adding, setAdding] = useState<string | null>(null);
+  const [moving, setMoving] = useState<MoveItem | null>(null);
   const [form, setForm] = useState({ qty: 1, finish: "nonfoil" as Finish, condition: "NM" });
 
   const refresh = () => qc.invalidateQueries();
@@ -185,15 +187,9 @@ function CardBody({ printingId, onClose, preview }: {
                     <td className="num" data-l="Market">{money(o.price)}</td>
                     <td>{tags.length ? tags.map(t => <TagChip key={t} t={t} />) : <span className="muted">collection</span>}</td>
                     <td className="right">
-                      <select value="" onChange={e => {
-                        const v = e.target.value;
-                        if (!v) return;
-                        run(api.send(o.lot_id, { deck: v === "__none" ? null : v }), v === "__none" ? "Back in collection" : "Moved to deck");
-                      }}>
-                        <option value="">Move…</option>
-                        {inDeck && <option value="__none">↩ Back to collection</option>}
-                        {(decks.data || []).map(d => <option key={d.slug} value={d.slug}>→ {d.name}</option>)}
-                      </select>
+                      <button className="small" onClick={() => setMoving({ key: String(o.lot_id), name: c.name, set_code: o.set_code,
+                        number: o.collector_number, finish: o.finish, image: o.image_small, lots: [{ lot_id: o.lot_id, qty: o.qty, tags: o.tags }] })}>
+                        {inDeck ? "Move…" : "Move to deck"}</button>
                     </td>
                   </tr>
                 );
@@ -254,6 +250,7 @@ function CardBody({ printingId, onClose, preview }: {
             ))}
           </tbody>
         </table>
+        {moving && <MoveSheet items={[moving]} onClose={() => setMoving(null)} />}
       </div>
   );
 }

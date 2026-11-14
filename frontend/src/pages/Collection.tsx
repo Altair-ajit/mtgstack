@@ -5,6 +5,7 @@ import { api, emptyFilters } from "../api";
 import type { CardRow, Filters } from "../api";
 import FilterPanel from "../components/Filters";
 import CardDrawer from "../components/CardDrawer";
+import MoveSheet from "../components/MoveSheet";
 import { CardImg, COND_LABEL, Empty, FinishBadge, HoverCard, LANG_LABEL, Mana, money, Pager, Rarity, TagChip, useDebounced, useToast } from "../ui";
 
 const SORTS: [string, string][] = [
@@ -66,7 +67,6 @@ export default function Collection() {
     enabled: wide || showFilters, placeholderData: keepPreviousData,
   });
   const ids = useMemo(() => [...new Set((data?.rows || []).map(r => r.printing_id))], [data]);
-  const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
 
   const rowKey = (r: CardRow) => `${r.printing_id}|${r.finish}|${r.condition}|${r.language}`;
   const selRows = (data?.rows || []).filter(r => selected.has(rowKey(r)));
@@ -77,7 +77,7 @@ export default function Collection() {
     try { await api.bulk(body); toast(msg); setSelected(new Set()); qc.invalidateQueries(); }
     catch (e) { toast(String((e as Error).message), "err"); }
   };
-  const [bulkDeck, setBulkDeck] = useState("");
+  const [moving, setMoving] = useState(false);
   const [bulkTag, setBulkTag] = useState("");
 
   return (
@@ -120,12 +120,7 @@ export default function Collection() {
         {selected.size > 0 && (
           <div className="bulkbar">
             <b>{selRows.reduce((n, r) => n + r.qty, 0)} cards selected</b>
-            <select value={bulkDeck} onChange={e => setBulkDeck(e.target.value)}>
-              <option value="">Move to deck…</option>
-              {(decks.data || []).map(d => <option key={d.slug} value={d.slug}>{d.name}</option>)}
-            </select>
-            <button disabled={!bulkDeck} onClick={() => bulk({ lot_ids: selLots, action: "send", deck: bulkDeck }, "Moved to deck")}>Move</button>
-            <button onClick={() => bulk({ lot_ids: selLots, action: "send", deck: null }, "Removed from decks")}>Remove from decks</button>
+            <button className="primary" onClick={() => setMoving(true)}>Move to deck…</button>
             <span className="sep" />
             <input placeholder="tag (e.g. box:3)" value={bulkTag} onChange={e => setBulkTag(e.target.value)} />
             <button disabled={!bulkTag} onClick={() => bulk({ lot_ids: selLots, action: "tag", tags: bulkTag.split(/[ ,]+/) }, "Tagged")}>Add tag</button>
@@ -198,6 +193,9 @@ export default function Collection() {
           </div>
         )}
       </main>
+      {moving && <MoveSheet onClose={() => setMoving(false)} onDone={() => setSelected(new Set())}
+        items={selRows.map(r => ({ key: rowKey(r), name: r.name, set_code: r.set_code, number: r.collector_number, finish: r.finish,
+          image: r.image_small, lots: r.lots }))} />}
       {open && <CardDrawer printingId={open} ids={ids} onNavigate={setOpen} onClose={() => setOpen(null)}
         preview={Object.fromEntries((data?.rows || []).map(r => [r.printing_id, { name: r.name, image: r.image_normal || r.image_small }]))} />}
     </div>

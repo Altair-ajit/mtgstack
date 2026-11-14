@@ -587,3 +587,20 @@ h1 .rename { font-size: 16px; vertical-align: middle; padding: 2px 6px; } .deck-
 .drawer { overflow-x: hidden; }
 .cd-slot.prev, .cd-slot.next { position: absolute; top: 0; width: 100%; height: 100vh; overflow: hidden; visibility: hidden; pointer-events: none; }
 .cd-slot.next { left: 100%; } .cd-slot.prev { right: 100%; } .cd-slot.show { visibility: visible; }
+
+/* move sheet: how many of each, then tap where they go */
+.mv-items { list-style: none; margin: 0 0 6px; padding: 0; max-height: 34vh; overflow: auto; }
+.mv-items li { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line2); }
+.mv-items .card-img { width: 38px; height: auto; aspect-ratio: 63 / 88; } .mv-name b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mv-qty { display: flex; flex-direction: column; align-items: center; gap: 2px; } .mv-all { display: flex; gap: 14px; justify-content: flex-end; }
+.mv-to { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 12px 0 8px; }
+.mv-decks { display: flex; flex-direction: column; gap: 8px; }
+.mv-deck { justify-content: space-between; padding: 12px 14px; font-size: 15px; text-align: left; white-space: normal; }
+.mv-deck:hover:not(:disabled) { border-color: var(--blue); background: var(--blue-l); }
+.mv-deck.new { justify-content: center; border-style: dashed; color: var(--blue-d); } .mv-deck.out { justify-content: center; color: var(--muted); }
+@media (max-width: 760px) {
+  .modal-bg { z-index: 80; }                 /* above the card view sheet, which can open one */
+  .mv-to .seg { width: 100%; } .mv-to .seg button { flex: 1; justify-content: center; padding: 8px 4px; font-size: 13px; }
+  .mv-deck { padding: 14px; }
+  .bulkbar { top: calc(50px + var(--safe-top)); padding: 8px 10px; } .bulkbar .sep { display: none; } .bulkbar input { flex: 1; min-width: 110px; }
+}

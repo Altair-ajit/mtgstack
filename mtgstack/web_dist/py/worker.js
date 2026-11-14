@@ -208,8 +208,10 @@ async function opfsProbe() {
   } catch { return null; }
 }
 
-// SQLite reads 4 KB pages; each OPFS read has fixed overhead, so read 1 MB blocks and keep the most recent 48 MB.
-const BLOCK = 1 << 20, MAX_BLOCKS = 48;
+// SQLite reads 4 KB pages; each OPFS read has fixed overhead, so read bigger blocks and keep the most recent 32 MB.
+// 64 KB, not more: lookups of single cards land all over a 200 MB file, and with 1 MB blocks every one of them read
+// (and evicted) a megabyte, which made anything touching many cards take seconds.
+const BLOCK = 1 << 16, MAX_BLOCKS = 512;
 const blockCache = new WeakMap();                        // SyncAccessHandle -> Map(blockIndex -> Uint8Array)
 function blocks(h) { let m = blockCache.get(h); if (!m) blockCache.set(h, (m = new Map())); return m; }
 function getBlock(h, i) {

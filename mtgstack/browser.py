@@ -152,6 +152,8 @@ def after_catalog_swap(version: str, printings: int, new_path: str | None = None
         os.replace(new_path, CATALOG_DB)
     start()
     conn = APP.state.conn
+    from . import db
+    db.sync_owned(conn, refresh=True)        # the copy of your cards' details and prices follows the new catalog
     conn.execute("""INSERT OR IGNORE INTO prices (printing_id, finish, source, kind, price, currency, as_of)
         SELECT cp.printing_id, cp.finish, cp.source, cp.kind, cp.price, cp.currency, cp.as_of FROM current_prices cp
         WHERE cp.printing_id IN (SELECT printing_id FROM lots

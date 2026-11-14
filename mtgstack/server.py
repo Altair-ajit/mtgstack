@@ -71,6 +71,17 @@ class Bulk(BaseModel):
     tags: list[str] = []
 
 
+class MoveOne(BaseModel):
+    lot_id: int
+    qty: int | None = None          # None = every copy in the lot
+
+
+class MoveMany(BaseModel):
+    moves: list[MoveOne]
+    deck: str | None = None         # None = out of any deck, back to the collection
+    board: str = "main"
+
+
 class ImportPreview(BaseModel):
     text: str
     filename: str | None = None
@@ -139,6 +150,33 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
         for a in allocations:
             a["deck_progress"] = guard(decks.reconcile, conn, a["deck"])["totals"]["progress"]
         return {**col.get_lot(conn, lot_id), "allocations": allocations}
+
+    @app.post("/api/lots/move")
+    def api_lots_move(body: MoveMany):
+        """Move copies into a deck/board (or out, deck=null), each lot with its own count: 1 of a stack of 3 leaves
+        two behind. All of it happens or none of it."""
+        def run():
+            if len(body.moves) > 2000:
+                raise ValueError("too many cards in one move")
+            moved = 0
+            try:
+                for m in body.moves:
+                    row = conn.execute("SELECT qty FROM lots WHERE id=?", (m.lot_id,)).fetchone()
+                    if not row:
+                        continue          # merged away by an earlier step in this batch
+                    n = row[0] if m.qty is None else m.qty
+                    if n <= 0:
+                        continue
+                    if n > row[0]:
+                        raise ValueError(f"only {row[0]} cop{'y' if row[0] == 1 else 'ies'} there, not {n}")
+                    decks.send(conn, m.lot_id, n, body.deck, body.board, commit=False)
+                    moved += n
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            return {"moved": moved}
+        return guard(run)
 
     @app.post("/api/lots/{lot_id}/send")
     def api_send(lot_id: int, body: Send):

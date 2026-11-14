@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export const money = (v: number | null | undefined) =>
   v === null || v === undefined ? "—" : v.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -84,14 +85,19 @@ export function Modal({ title, onClose, children, wide, footer }: { title: strin
     window.addEventListener("keydown", k);
     return () => window.removeEventListener("keydown", k);
   }, [onClose]);
-  return (
-    <div className="modal-bg" onMouseDown={e => e.target === e.currentTarget && onClose()}>
+  // Drawn on the page itself, not where it is used: a dialog opened from the card view would otherwise be clipped
+  // and moved with that view. React still passes its events up to where it was used, so touches and keys stop here.
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
+  return createPortal(
+    <div className="modal-bg" onMouseDown={e => e.target === e.currentTarget && onClose()}
+      onTouchStart={stop} onTouchMove={stop} onTouchEnd={stop} onKeyDown={stop}>
       <div className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-label={title}>
         <div className="modal-head"><h2>{title}</h2><button className="icon" onClick={onClose} aria-label="Close">×</button></div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

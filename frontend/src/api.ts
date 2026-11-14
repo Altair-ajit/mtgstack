@@ -132,6 +132,9 @@ export const api = {
     req("PATCH", `/api/lots/${id}`, b),
   bulk: (b: { lot_ids: number[]; action: "send" | "tag" | "untag" | "remove"; qty?: number | null; deck?: string | null;
     board?: string; tags?: string[] }) => post("/api/lots/bulk", b),
+  /** move copies into a deck/board, or out (deck null); each lot with its own count, all or nothing */
+  moveLots: (moves: { lot_id: number; qty?: number }[], deck: string | null, board = "main") =>
+    post<{ moved: number }>("/api/lots/move", { moves, deck, board }),
   send: (lot: number, b: { qty?: number | null; deck: string | null; board?: string }) => post(`/api/lots/${lot}/send`, b),
   tags: () => get<{ tag: string; lots: number; cards: number }[]>("/api/tags"),
   decks: () => get<Deck[]>("/api/decks"),

@@ -103,6 +103,8 @@ def add(conn: sqlite3.Connection, printing_id: str, qty: int = 1, finish: str = 
         "INSERT INTO lots(printing_id, finish, condition, language, qty, acquired_price, notes) VALUES (?,?,?,?,?,?,?)",
         (printing_id, finish, norm_condition(condition), language, qty, acquired_price, notes))
     lot_id = cur.lastrowid
+    from . import db
+    db.copy_owned(conn, [printing_id])     # split layout: the collection lists it from the user file (db.sync_owned)
     # now owned: start its price history from today's prices
     conn.execute("INSERT OR IGNORE INTO prices SELECT * FROM current_prices WHERE printing_id = ?", (printing_id,))
     _set_tags(conn, lot_id, norm_tags(tags))

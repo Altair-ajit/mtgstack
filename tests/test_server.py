@@ -84,6 +84,25 @@ def test_browse_import_and_lot_endpoints(tmp_path):
     assert [r["name"] for r in blue["rows"]] == ["Counterspell"] and blue["totals"]["cards"] == 3
     lot = blue["rows"][0]["lots"][0]["lot_id"]
     assert c.patch(f"/api/lots/{lot}", json={"qty": 1, "condition": "NM"}).json()["lot"]["condition"] == "NM"
+    # move 1 of a stack of 3 into a deck: two stay loose, one is in the deck and on its list; all or nothing
+    c.post("/api/decks", json={"name": "Split Test", "text": "", "status": "building"})
+    c.patch(f"/api/lots/{lot}", json={"qty": 3})
+    stack = c.get("/api/cards", params={"q": "counterspell", "facets": "false"}).json()["rows"][0]
+    assert stack["qty"] == 3
+    lot3 = stack["lots"][0]["lot_id"]
+    assert c.post("/api/lots/move", json={"moves": [{"lot_id": lot3, "qty": 1}], "deck": "split-test"}).json() == {"moved": 1}
+    rows = c.get("/api/cards", params={"q": "counterspell", "facets": "false"}).json()["rows"]
+    assert sorted((l["qty"], "deck:split-test" in (l["tags"] or "")) for r in rows for l in r["lots"]) == [(1, True), (2, False)]
+    assert [(e["name"], e["wanted"], e["in_deck"]) for e in c.get("/api/decks/split-test").json()["entries"]] == [("Counterspell", 1, 1)]
+    loose = next(l["lot_id"] for r in rows for l in r["lots"] if "deck:" not in (l["tags"] or ""))
+    bad = c.post("/api/lots/move", json={"moves": [{"lot_id": loose, "qty": 1}, {"lot_id": loose, "qty": 9}], "deck": "split-test"})
+    assert bad.status_code == 400 and "only" in bad.json()["detail"]
+    assert c.get("/api/decks/split-test").json()["totals"]["in_deck"] == 1                  # the first step was undone too
+    inside = next(l["lot_id"] for r in rows for l in r["lots"] if "deck:split-test" in (l["tags"] or ""))
+    assert c.post("/api/lots/move", json={"moves": [{"lot_id": inside}], "deck": None}).json() == {"moved": 1}
+    assert c.get("/api/cards", params={"q": "counterspell", "facets": "false"}).json()["rows"][0]["lots"][0]["qty"] == 3
+    c.patch(f"/api/lots/{c.get('/api/cards', params={'q': 'counterspell', 'facets': 'false'}).json()['rows'][0]['lots'][0]['lot_id']}", json={"qty": 1})
+    c.delete("/api/decks/split-test")
     # a deck needs only a name: an empty one is filled by hand later
     empty = c.post("/api/decks", json={"name": "Brew In Progress", "text": "", "format": "commander", "status": "building"}).json()
     assert (empty["slug"], empty["entries"], empty["unresolved"]) == ("brew-in-progress", 0, [])
