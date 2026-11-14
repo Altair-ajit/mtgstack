@@ -79,7 +79,20 @@ export function TagChip({ t, onClick }: { t: string; onClick?: () => void }) {
   return <span className={`chip ${kind}`} onClick={onClick}>{t.replace(/^deck:/, "")}</span>;
 }
 
-export function Modal({ title, onClose, children, wide, footer }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; footer?: ReactNode }) {
+// Phones: how much of the screen the on-screen keyboard leaves. A `tall` dialog is sized to it (see styles.css).
+if (typeof window !== "undefined" && window.visualViewport) {
+  const vv = window.visualViewport;
+  const fit = () => {
+    document.documentElement.style.setProperty("--vvh", `${Math.round(vv.height)}px`);
+    document.documentElement.style.setProperty("--vvtop", `${Math.round(vv.offsetTop)}px`);
+  };
+  vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit); fit();
+}
+
+/** `tall`: for a dialog you type a search into. On a phone it is pinned to the top of the screen at a fixed height,
+ * so the box you are typing in stays where it is while the results under it come and go, and it ends above the
+ * keyboard. (A dialog that grows up from the bottom pushed the box off the top of the screen.) */
+export function Modal({ title, onClose, children, wide, tall, footer }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean; tall?: boolean; footer?: ReactNode }) {
   useEffect(() => {
     const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", k);
@@ -91,7 +104,7 @@ export function Modal({ title, onClose, children, wide, footer }: { title: strin
   return createPortal(
     <div className="modal-bg" onMouseDown={e => e.target === e.currentTarget && onClose()}
       onTouchStart={stop} onTouchMove={stop} onTouchEnd={stop} onKeyDown={stop}>
-      <div className={`modal ${wide ? "wide" : ""}`} role="dialog" aria-label={title}>
+      <div className={`modal ${wide ? "wide" : ""} ${tall ? "tall" : ""}`} role="dialog" aria-label={title}>
         <div className="modal-head"><h2>{title}</h2><button className="icon" onClick={onClose} aria-label="Close">×</button></div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}

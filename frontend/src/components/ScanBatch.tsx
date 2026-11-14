@@ -47,7 +47,7 @@ function EditPrinting({ item, onChange, onClose }: { item: BatchItem; onChange: 
     return () => { live = false; };
   }, [item.printing_id]);
   return (
-    <Modal title={other ? "What card is it?" : `${item.name}: which printing?`} wide onClose={onClose} footer={<>
+    <Modal title={other ? "What card is it?" : `${item.name}: which printing?`} wide tall={other} onClose={onClose} footer={<>
       <button className="link" onClick={() => { setOther(!other); setPick(null); }}>{other ? "‹ Back to printings" : "Not this card? Search by name"}</button>
       {other && <button className="primary" disabled={!pick} onClick={async () => {
         if (!pick) return;

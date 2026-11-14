@@ -149,23 +149,114 @@ def import_decklist(conn: sqlite3.Connection, catalog: Catalog, name: str, text:
     return {"slug": slug, "entries": len(parse_decklist(text)), "unresolved": unresolved}
 
 
-def _cover(conn, slug: str, fresh: bool = False) -> None:
+def _cover(conn, slug: str, fresh: bool = False, oracle_id: str | None = None) -> None:
     """Make the deck's list cover the cards tagged into it: a tagged card that is not on the list gets an entry,
     and a wanted count lower than the copies now in the deck is raised. Nothing is removed. (`fresh`: the list was
-    just emptied, so every tagged card is new.) Does not commit."""
+    just emptied, so every tagged card is new. `oracle_id`: only look at this card.) Does not commit.
+
+    What it adds is counted in `placed`: wanted only because the copies are there, not because a list asked for
+    them. `_uncover` takes it off again when those copies leave, so a card moved in and back out is not left
+    behind as one "to buy".
+
+    An entry may ask for one printing or finish (a list imported with set codes). Copies of another printing in the
+    deck are not counted by it, so they get an entry of their own (any printing): otherwise they would be in the
+    deck and nowhere on its page."""
+    from . import db
+    printings = "own_printings" if db.is_split(conn) else "printings"     # phone build: the copy in the user file
+    one = " AND p.oracle_id = ?" if oracle_id else ""
     for board in BOARDS:
-        tagged = rows(conn.execute(
-            "SELECT p.name, p.oracle_id, SUM(l.qty) q FROM lots l JOIN printings p ON p.id=l.printing_id "
-            "JOIN lot_tags t ON t.lot_id=l.id WHERE t.tag=? GROUP BY p.oracle_id", (board_tag(slug, board),)))
-        for r in tagged:
-            have = (0, None) if fresh else conn.execute(
-                "SELECT COALESCE(SUM(qty), 0), MIN(id) FROM deck_entries WHERE deck_slug=? AND board=? AND oracle_id=?",
-                (slug, board, r["oracle_id"])).fetchone()
-            if have[1] is None:
-                conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, qty) VALUES (?,?,?,?,?)",
-                             (slug, board, r["name"], r["oracle_id"], r["q"]))
-            elif have[0] < r["q"]:
-                conn.execute("UPDATE deck_entries SET qty = qty + ? WHERE id=?", (r["q"] - have[0], have[1]))
+        tagged: dict[str, dict] = {}
+        for r in conn.execute(
+                f"SELECT p.oracle_id, p.name, l.printing_id, l.finish, SUM(l.qty) q FROM lots l "
+                f"JOIN {printings} p ON p.id=l.printing_id JOIN lot_tags t ON t.lot_id=l.id WHERE t.tag=?{one} "
+                f"GROUP BY p.oracle_id, l.printing_id, l.finish",
+                (board_tag(slug, board), *([oracle_id] if oracle_id else []))).fetchall():
+            c = tagged.setdefault(r["oracle_id"], {"name": r["name"], "lots": []})
+            c["lots"].append((r["printing_id"], r["finish"], r["q"]))
+        for oid, c in tagged.items():
+            total = sum(q for _, _, q in c["lots"])
+            listed = [] if fresh else conn.execute(
+                "SELECT id, printing_id, finish, qty FROM deck_entries WHERE deck_slug=? AND board=? AND oracle_id=? ORDER BY id",
+                (slug, board, oid)).fetchall()
+            anyp = [e for e in listed if not e["printing_id"] and not e["finish"]]
+            # copies the entries for one printing/finish account for; the rest need an any-printing entry
+            exact = sum(min(e["qty"], sum(q for p, f, q in c["lots"] if (not e["printing_id"] or p == e["printing_id"])
+                                           and (not e["finish"] or f == e["finish"])))
+                        for e in listed if e["printing_id"] or e["finish"])
+            short = total - min(exact, total) - sum(e["qty"] for e in anyp)
+            if short <= 0:
+                continue
+            if anyp:
+                conn.execute("UPDATE deck_entries SET qty = qty + ?, placed = placed + ? WHERE id=?", (short, short, anyp[0]["id"]))
+            else:
+                conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, qty, placed) "
+                             "VALUES (?,?,?,?,?,?)", (slug, board, c["name"], oid, short, 0 if fresh else short))
+
+
+def lists_follow(conn, oracle_id: str, qty: int, old_tags, new_tags) -> None:
+    """Copies of a card changed tags, by whatever route (move sheet, tag box, bulk edit, import): the decks they
+    entered list them (`_cover`), the decks they left drop what they only listed for being there (`_uncover`).
+    Does not commit."""
+    old = {t for t in old_tags if t.startswith("deck:")}
+    new = {t for t in new_tags if t.startswith("deck:")}
+    for t in sorted(old - new):
+        parts = t.split(":")
+        _uncover(conn, parts[1], parts[2] if len(parts) > 2 else "main", oracle_id, qty)
+    for slug in sorted({t.split(":")[1] for t in new - old}):
+        if conn.execute("SELECT 1 FROM decks WHERE slug=?", (slug,)).fetchone():
+            _cover(conn, slug, oracle_id=oracle_id)
+
+
+def _uncover(conn, slug: str, board: str, oracle_id: str, n: int) -> None:
+    """`n` copies of a card left this deck/board: take them off the list too, as far as they were only on it for
+    being in the deck (see `_cover`). What a decklist asked for stays, and shows as to move or to buy. Does not commit."""
+    for e in conn.execute("SELECT id, qty, placed FROM deck_entries WHERE deck_slug=? AND board=? AND oracle_id=? "
+                          "AND placed > 0 ORDER BY id DESC", (slug, board, oracle_id)).fetchall():
+        take = min(n, e["placed"], e["qty"])
+        if take >= e["qty"]:
+            conn.execute("DELETE FROM deck_entries WHERE id=?", (e["id"],))
+        else:
+            conn.execute("UPDATE deck_entries SET qty = qty - ?, placed = placed - ? WHERE id=?", (take, take, e["id"]))
+        n -= take
+        if n <= 0:
+            break
+
+
+def _entry(conn, slug: str, entry_id: int) -> dict:
+    e = next((e for e in entries(conn, slug) if e["entry_id"] == entry_id), None)
+    if not e:
+        raise KeyError(f"no such card on the list of deck {slug}")
+    return e
+
+
+def set_entry(conn, slug: str, entry_id: int, qty: int) -> None:
+    """Change how many copies of a card the deck's list asks for."""
+    e = _entry(conn, slug, entry_id)
+    if not 1 <= qty <= 999:
+        raise ValueError("the count must be between 1 and 999")
+    if qty < e["in_deck"]:
+        raise ValueError(f"{e['in_deck']} cop{'y is' if e['in_deck'] == 1 else 'ies are'} in the deck: move some out first")
+    conn.execute("UPDATE deck_entries SET qty=?, placed=0 WHERE id=?", (qty, entry_id))    # now asked for, not just there
+    log_event(conn, "deck_entry", slug=slug, entry_id=entry_id, qty=qty)
+    conn.commit()
+
+
+def remove_entry(conn, slug: str, entry_id: int) -> int:
+    """Take a card off the deck's list. Copies of it that are in the deck go back to the collection (they would
+    put it back on the list otherwise). Returns how many copies went back."""
+    e = _entry(conn, slug, entry_id)
+    back = 0
+    try:
+        for lot in _lots_for(conn, e, _has_tag("x.tag = ?"), [e["board_tag"]]):
+            col.move(conn, lot["lot_id"], remove_tags=[e["board_tag"]], commit=False)
+            back += lot["qty"]
+        conn.execute("DELETE FROM deck_entries WHERE id=?", (entry_id,))
+        log_event(conn, "deck_entry_remove", slug=slug, name=e["name"], returned=back)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return back
 
 
 def cover_all(conn) -> int:
@@ -348,10 +439,9 @@ def send(conn, lot_id: int, qty: int | None = None, deck: str | None = None, boa
         raise KeyError(f"no deck {deck}")
     if board not in BOARDS:
         raise ValueError(f"board must be one of {BOARDS}")
+    # the lists follow in col.move: the deck it enters lists it, a deck it leaves drops what it only listed for being there
     target = col.move(conn, lot_id, qty, add_tags=[board_tag(deck, board)] if deck else None,
                       remove_tags=["deck:*"], commit=False)
-    if deck:
-        _cover(conn, deck)          # a card put in a deck by hand belongs on its list, or the deck page hides it
     log_event(conn, "send", lot_id=lot_id, qty=qty, deck=deck, board=board, to_lot=target)
     if commit:
         conn.commit()
@@ -363,7 +453,8 @@ def release(conn, slug: str) -> int:
     lots = rows(conn.execute("SELECT DISTINCT lot_id FROM lot_tags WHERE tag = ? OR tag LIKE ?",
                              (f"deck:{slug}", f"deck:{slug}:%")))
     for l in lots:
-        col.move(conn, l["lot_id"], remove_tags=[f"deck:{slug}", f"deck:{slug}:*"], commit=False)
+        # the list stays as it is: the deck is being emptied, not changed, and its cards show as "to move" back
+        col.move(conn, l["lot_id"], remove_tags=[f"deck:{slug}", f"deck:{slug}:*"], commit=False, lists=False)
     log_event(conn, "deck_release", slug=slug, lots=len(lots))
     conn.commit()
     return len(lots)

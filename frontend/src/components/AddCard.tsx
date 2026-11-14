@@ -54,7 +54,7 @@ export default function AddCard({ onClose, deck: deck0 }: { onClose: () => void;
   };
 
   return (
-    <Modal title="Add cards" onClose={onClose} wide footer={<>
+    <Modal title={deck0 ? "Add cards to this deck" : "Add cards"} onClose={onClose} wide tall footer={<>
       {addedCount > 0 && <span className="muted">{addedCount} added this session</span>}
       <button onClick={onClose}>Done</button>
       <button disabled={!sel} onClick={() => add(false)}>Add &amp; add another</button>

@@ -71,6 +71,10 @@ class Bulk(BaseModel):
     tags: list[str] = []
 
 
+class EntryPatch(BaseModel):
+    qty: int
+
+
 class MoveOne(BaseModel):
     lot_id: int
     qty: int | None = None          # None = every copy in the lot
@@ -319,6 +323,17 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
     @app.get("/api/decks/{slug}")
     def api_deck(slug: str, q: str = ""):
         return guard(decks.reconcile, conn, slug, q)
+
+    @app.patch("/api/decks/{slug}/entries/{entry_id}")
+    def api_entry_patch(slug: str, entry_id: int, body: EntryPatch):
+        """How many copies of a card the deck's list asks for."""
+        guard(decks.set_entry, conn, slug, entry_id, body.qty)
+        return {"ok": True}
+
+    @app.delete("/api/decks/{slug}/entries/{entry_id}")
+    def api_entry_delete(slug: str, entry_id: int):
+        """Take a card off the deck's list; its copies in the deck go back to the collection."""
+        return {"returned": guard(decks.remove_entry, conn, slug, entry_id)}
 
     @app.post("/api/decks/{slug}/pull")
     def api_pull(slug: str, prefer: str = "cheapest", dry_run: bool = False, remove_tags: str = "", q: str = ""):

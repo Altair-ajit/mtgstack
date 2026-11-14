@@ -475,7 +475,7 @@ export default function Scan() {
         </div>
       </main>
       {byName && (
-        <Modal title="Add a card by name" wide onClose={() => { setByName(false); setNamePick(null); }} footer={<>
+        <Modal title="Add a card by name" wide tall onClose={() => { setByName(false); setNamePick(null); }} footer={<>
           <button onClick={() => { setByName(false); setNamePick(null); }}>Cancel</button>
           <button className="primary" disabled={!namePick} onClick={async () => {
             if (!namePick) return;

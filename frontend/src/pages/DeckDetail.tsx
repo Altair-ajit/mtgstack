@@ -22,6 +22,7 @@ export default function DeckDetail() {
   const [open, setOpen] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState<Entry | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
   const nav = useNavigate();
@@ -154,6 +155,8 @@ export default function DeckDetail() {
                           onClick={() => run(api.send(l.lot_id, { qty: 1, deck: null }), `${e.name} returned to collection`)}>↩</button>
                       ))}
                       {e.in_other_decks.slice(0, 1).map(od => <TagChip key={od} t={od} />)}
+                      <button className="small ghost" title="Change the count, or take it off this deck" aria-label={`Edit ${e.name} in this deck`}
+                        onClick={() => setEditing(e)}>Edit</button>
                     </td>
                   </tr>
                 ))}
@@ -165,9 +168,45 @@ export default function DeckDetail() {
       </main>
       {open && <CardDrawer printingId={open} ids={[...new Set(groups.flatMap(([, es]) => es.map(e => e.card_printing_id)))]} onNavigate={setOpen}
         preview={Object.fromEntries((data.entries || []).map(e => [e.card_printing_id, { name: e.name, image: e.image_normal || e.image_small }]))} onClose={() => setOpen(null)} />}
+      {editing && <EntryEdit slug={slug} e={editing} onClose={() => setEditing(null)} />}
       {adding && <AddCard deck={slug} onClose={() => setAdding(false)} />}
       {exporting && <ExportModal slug={slug} decks={(decks.data || []).length} initial={exporting} onClose={() => setExporting(null)} />}
     </div>
+  );
+}
+
+/** One card on the deck's list: how many the deck wants, or off the list altogether. */
+function EntryEdit({ slug, e, onClose }: { slug: string; e: Entry; onClose: () => void }) {
+  const min = Math.max(1, e.in_deck);
+  const [n, setN] = useState(e.wanted);
+  const [busy, setBusy] = useState(false);
+  const qc = useQueryClient();
+  const toast = useToast();
+  const run = async (p: Promise<unknown>, msg: string) => {
+    setBusy(true);
+    try { await p; toast(msg); await qc.invalidateQueries(); onClose(); }
+    catch (err) { toast(String((err as Error).message), "err"); setBusy(false); }
+  };
+  return (
+    <Modal title={e.name} onClose={onClose} footer={<>
+      <button onClick={onClose}>Cancel</button>
+      <button className="primary" disabled={busy || n === e.wanted} onClick={() => run(api.setEntry(slug, e.entry_id, n), `${e.name}: ${n} wanted`)}>Save</button>
+    </>}>
+      <div className="entry-edit">
+        <div><b>Copies this deck wants</b>
+          <div className="muted small">{e.in_deck} in the deck now{e.to_move ? `, ${e.to_move} to move in` : ""}{e.to_buy ? `, ${e.to_buy} to buy` : ""}</div></div>
+        <div className="stepper" role="group" aria-label="Copies wanted">
+          <button onClick={() => setN(Math.max(min, n - 1))} disabled={n <= min} aria-label="One fewer">−</button>
+          <input inputMode="numeric" value={n} aria-label="Copies wanted" onChange={ev => setN(Math.max(min, Math.min(999, parseInt(ev.target.value, 10) || min)))} />
+          <button onClick={() => setN(Math.min(999, n + 1))} aria-label="One more">+</button>
+        </div>
+      </div>
+      {e.in_deck > 1 && n <= min && <p className="muted small">{e.in_deck} copies are in the deck. To want fewer, move a copy out first (↩).</p>}
+      <button className="danger wide-btn" disabled={busy} onClick={() => run(api.removeEntry(slug, e.entry_id),
+        e.in_deck ? `${e.name} is off the deck; ${e.in_deck} cop${e.in_deck === 1 ? "y" : "ies"} back in the collection` : `${e.name} is off the deck`)}>
+        Remove from this deck</button>
+      {e.in_deck > 0 && <p className="muted small">The {e.in_deck === 1 ? "copy" : `${e.in_deck} copies`} in the deck stay{e.in_deck === 1 ? "s" : ""} in your collection.</p>}
+    </Modal>
   );
 }
 

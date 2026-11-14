@@ -149,6 +149,10 @@ export const api = {
   /** grow a deck's list to cover the cards tagged into it (after scanning cards into the deck) */
   deckCover: (slug: string) => post<{ slug: string }>(`/api/decks/${slug}/from-tags?keep=true`),
   pull: (slug: string, prefer = "cheapest") => post<{ pulled: { qty: number }[] }>(`/api/decks/${slug}/pull?${qs({ prefer })}`),
+  /** how many copies the deck's list asks for */
+  setEntry: (slug: string, entry: number, qty: number) => req("PATCH", `/api/decks/${slug}/entries/${entry}`, { qty }),
+  /** take a card off the deck's list; copies of it in the deck go back to the collection */
+  removeEntry: (slug: string, entry: number) => req("DELETE", `/api/decks/${slug}/entries/${entry}`) as Promise<{ returned: number }>,
   release: (slug: string) => post(`/api/decks/${slug}/release`),
   exportDeck: (slug: string, fmt: string, source: string) => get<string>(`/api/decks/${slug}/export?${qs({ fmt, source })}`),
   missing: (slug: string) => get<string>(`/api/decks/${slug}/missing`),

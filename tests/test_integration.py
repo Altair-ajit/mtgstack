@@ -96,9 +96,73 @@ def test_a_card_moved_into_a_deck_shows_on_its_list(conn, cat):
     decks.send(conn, query(conn, "counterspell -tag:deck:*")[0]["lot_id"], 1, slug, board="side")
     got = {(e["name"], e["board"]): e["wanted"] for e in decks.reconcile(conn, slug)["entries"]}
     assert got == {("Counterspell", "main"): 2, ("Counterspell", "side"): 1}
-    # taking it back out does not shrink the list: it is still a card the deck wants
+    # taking it back out takes it off the list again: it was only listed for being there, so it is not "to buy"
+    decks.send(conn, query(conn, "counterspell tag:deck:test-deck")[0]["lot_id"], 1, None)
+    got = {(e["name"], e["board"]): (e["wanted"], e["to_buy"]) for e in decks.reconcile(conn, slug)["entries"]}
+    assert got == {("Counterspell", "main"): (1, 0), ("Counterspell", "side"): (1, 0)}
     decks.send(conn, query(conn, "counterspell tag:deck:test-deck")[0]["lot_id"], None, None)
-    assert {e["wanted"] for e in decks.reconcile(conn, slug)["entries"]} == {2, 1}
+    assert [(e["board"], e["wanted"]) for e in decks.reconcile(conn, slug)["entries"]] == [("side", 1)]
+    # from one board to another: the list follows
+    decks.send(conn, query(conn, "counterspell tag:deck:test-deck:side")[0]["lot_id"], None, slug, board="main")
+    assert [(e["board"], e["wanted"], e["in_deck"]) for e in decks.reconcile(conn, slug)["entries"]] == [("main", 1, 1)]
+
+
+def test_deck_lists_follow_tags_however_they_change(conn, cat):
+    """A card gets into or out of a deck by more routes than the move sheet: the tag box, a bulk edit, an import.
+    The deck's list follows all of them."""
+    slug = decks.create_deck(conn, "Brew", "commander", status="built")
+    lot = col.add(conn, pid(cat, "Counterspell", "dmr"), 3, auto_allocate=False)
+    in_deck = col.move(conn, lot, 2, add_tags=["deck:brew", "binder"])                 # tagged by hand
+    assert [(e["name"], e["wanted"], e["in_deck"]) for e in decks.reconcile(conn, slug)["entries"]] == [("Counterspell", 2, 2)]
+    col.move(conn, in_deck, 1, remove_tags=["deck:brew"])                              # one untagged by hand
+    assert [(e["wanted"], e["in_deck"], e["to_buy"]) for e in decks.reconcile(conn, slug)["entries"]] == [(1, 1, 0)]
+    col.move(conn, query(conn, "counterspell tag:deck:brew")[0]["lot_id"], set_tags=["binder"])     # tags replaced
+    assert decks.reconcile(conn, slug)["entries"] == []
+    # a tag that names no deck is only a tag
+    col.move(conn, query(conn, "counterspell")[0]["lot_id"], 1, add_tags=["deck:nowhere"])
+    assert conn.execute("SELECT COUNT(*) FROM deck_entries").fetchone()[0] == 0
+
+
+def test_what_a_decklist_asks_for_stays_when_copies_come_and_go(conn, cat):
+    """Only what was listed for being in the deck leaves with the copies. A list you imported keeps its cards
+    (they show as to move or to buy), and emptying a deck keeps its whole list."""
+    own(conn, cat)
+    slug = decks.import_decklist(conn, cat, "Atraxa Superfriends", DECK, fmt="commander")["slug"]
+    decks.pull(conn, slug)
+    before = {(e["name"], e["board"]): e["wanted"] for e in decks.reconcile(conn, slug)["entries"]}
+    decks.send(conn, query(conn, "counterspell tag:deck:atraxa-superfriends")[0]["lot_id"], 1, None)
+    assert {(e["name"], e["board"]): e["wanted"] for e in decks.reconcile(conn, slug)["entries"]} == before
+    # a third Counterspell put in by hand raises the count, and taking it out lowers it again, but not below the list
+    decks.send(conn, query(conn, "counterspell -tag:deck:*")[0]["lot_id"], 2, slug)
+    assert {e["name"]: e["wanted"] for e in decks.reconcile(conn, slug)["entries"]}["Counterspell"] == 3
+    for _ in range(3):
+        decks.send(conn, query(conn, "counterspell tag:deck:atraxa-superfriends")[0]["lot_id"], 1, None)
+    cs = next(e for e in decks.reconcile(conn, slug)["entries"] if e["name"] == "Counterspell")
+    assert (cs["wanted"], cs["in_deck"]) == (2, 0)
+    # a scanned-in card, then "Return all cards": everything stays on the list, to move back in
+    col.add(conn, cat.prints_by_name("Swords to Plowshares")[0]["id"], 1, tags="deck:atraxa-superfriends")
+    listed = {(e["name"], e["board"]): e["wanted"] for e in decks.reconcile(conn, slug)["entries"]}
+    assert listed[("Swords to Plowshares", "main")] == 1
+    decks.release(conn, slug)
+    assert {(e["name"], e["board"]): e["wanted"] for e in decks.reconcile(conn, slug)["entries"]} == listed
+
+
+def test_another_printing_than_the_list_names_still_shows_in_the_deck(conn, cat):
+    """A list imported with set codes asks for exact printings. A copy of another printing put in the deck is not
+    counted by that entry, so it gets one of its own: it must not be in the deck and missing from its page."""
+    slug = decks.create_deck(conn, "Exact", "commander", status="built")
+    sol = conn.execute("SELECT oracle_id FROM printings WHERE id=?", (pid(cat, "Sol Ring", "cmm"),)).fetchone()[0]
+    conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, printing_id, qty) VALUES (?,?,?,?,?,?)",
+                 (slug, "main", "Sol Ring", sol, pid(cat, "Sol Ring", "cmm"), 1))
+    other = col.add(conn, pid(cat, "Sol Ring", "c21"), 1, auto_allocate=False)
+    decks.send(conn, other, None, slug)
+    rows = sorted((e["printing_id"] or "", e["wanted"], e["in_deck"]) for e in decks.reconcile(conn, slug)["entries"])
+    assert rows == [("", 1, 1), (pid(cat, "Sol Ring", "cmm"), 1, 0)]
+    assert decks.reconcile(conn, slug)["totals"]["in_deck"] == 1
+    exact = col.add(conn, pid(cat, "Sol Ring", "cmm"), 1, auto_allocate=False)          # the printing it asked for
+    decks.send(conn, exact, None, slug)
+    assert decks.reconcile(conn, slug)["totals"]["progress"] == "2/2"
+    assert decks.cover_all(conn) == 0
 
 
 def test_startup_shows_cards_that_were_moved_into_decks_before(conn, cat, tmp_path):
@@ -106,7 +170,7 @@ def test_startup_shows_cards_that_were_moved_into_decks_before(conn, cat, tmp_pa
     slug = decks.create_deck(conn, "Old Deck", "commander")
     conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, qty) VALUES (?,?,?,?)", (slug, "main", "Island", 10))
     lot = col.add(conn, pid(cat, "Sol Ring", "cmm"), 2, "foil", "NM", "en", auto_allocate=False)
-    col.move(conn, lot, None, add_tags=["deck:old-deck"])            # what a move used to do: the tag, nothing else
+    col.move(conn, lot, None, add_tags=["deck:old-deck"], lists=False)   # what a move used to do: the tag, nothing else
     assert "Sol Ring" not in {e["name"] for e in decks.reconcile(conn, slug)["entries"]}
     assert decks.cover_all(conn) == 1
     got = {e["name"]: (e["wanted"], e["in_deck"]) for e in decks.reconcile(conn, slug)["entries"]}

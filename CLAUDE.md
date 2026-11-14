@@ -37,6 +37,9 @@ README.md covers features; AGENTS.md covers the CLI and API contract.
 - A collection row is printing + finish + condition + language. Lots under it differ only by tags.
 - Lots with identical attributes and tags merge automatically, so never assume a lot id survives a move.
 - Deck tags: `deck:<slug>` (main), `deck:<slug>:<board>`. A card is "free" when it has no `deck:` tag.
+- A deck's list follows its cards' tags: `collection.move`/`add` call `decks.lists_follow`, so a card tagged into a deck
+  by any route is listed (`_cover`), and one that leaves takes off what was only listed for being there (`placed`).
+  What a decklist asked for stays. Change deck tags through `collection.move`, not by writing `lot_tags`.
 - Auto-allocation only acts on cards entering the collection, never on existing ones (so overrides stick).
 - Scanner thresholds were tuned on synthetic images only. Validate changes against real photos: read the labelled
   photos you have by eye (the Scanner Lab that saved and replayed scans was removed: scans are no longer kept

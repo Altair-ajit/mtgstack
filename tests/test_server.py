@@ -101,6 +101,37 @@ def test_browse_import_and_lot_endpoints(tmp_path):
     inside = next(l["lot_id"] for r in rows for l in r["lots"] if "deck:split-test" in (l["tags"] or ""))
     assert c.post("/api/lots/move", json={"moves": [{"lot_id": inside}], "deck": None}).json() == {"moved": 1}
     assert c.get("/api/cards", params={"q": "counterspell", "facets": "false"}).json()["rows"][0]["lots"][0]["qty"] == 3
+    # ...and moved back out it is off the deck's list again: it was only listed for being there, so it is not "to buy"
+    assert c.get("/api/decks/split-test").json()["entries"] == []
+    # a card added straight into a deck (the deck page's "Add card") is on that deck's list
+    added = c.post("/api/lots", json={"printing_id": stack["printing_id"], "qty": 1, "tags": ["deck:split-test"]}).json()
+    listed = c.get("/api/decks/split-test").json()["entries"]
+    assert [(e["name"], e["wanted"], e["in_deck"], e["to_buy"]) for e in listed] == [("Counterspell", 1, 1, 0)]
+    # taking a card off the list sends its copies back to the collection
+    assert c.delete(f"/api/decks/split-test/entries/{listed[0]['entry_id']}").json() == {"returned": 1}
+    assert c.get("/api/decks/split-test").json()["entries"] == []
+    back = [l for r in c.get("/api/cards", params={"q": "counterspell", "facets": "false"}).json()["rows"] for l in r["lots"]]
+    assert sum(l["qty"] for l in back) == 4 and not any("deck:" in (l["tags"] or "") for l in back)
+    for l in back[1:]:
+        c.post(f"/api/lots/{l['lot_id']}/remove")
+    c.patch(f"/api/lots/{back[0]['lot_id']}", json={"qty": 3})
+    # what a decklist asks for stays when a copy is moved in and out; its count can be changed, or the card removed
+    c.post("/api/decks", json={"name": "Listed Test", "text": "2 Counterspell", "status": "built"})
+    lot3 = c.get("/api/cards", params={"q": "counterspell", "facets": "false"}).json()["rows"][0]["lots"][0]["lot_id"]
+    c.post("/api/lots/move", json={"moves": [{"lot_id": lot3, "qty": 1}], "deck": "listed-test"})
+    e = c.get("/api/decks/listed-test").json()["entries"][0]
+    assert (e["wanted"], e["in_deck"]) == (2, 1)
+    assert c.post("/api/lots/move", json={"moves": [{"lot_id": e["in_deck_lots"][0]["lot_id"]}], "deck": None}).json() == {"moved": 1}
+    e = c.get("/api/decks/listed-test").json()["entries"][0]
+    assert (e["wanted"], e["in_deck"]) == (2, 0)
+    assert c.patch(f"/api/decks/listed-test/entries/{e['entry_id']}", json={"qty": 1}).json() == {"ok": True}
+    assert c.get("/api/decks/listed-test").json()["entries"][0]["wanted"] == 1
+    assert c.patch(f"/api/decks/listed-test/entries/{e['entry_id']}", json={"qty": 0}).status_code == 400
+    assert c.patch("/api/decks/listed-test/entries/999999", json={"qty": 1}).status_code == 400
+    assert c.delete(f"/api/decks/listed-test/entries/{e['entry_id']}").json() == {"returned": 0}
+    assert c.get("/api/decks/listed-test").json()["entries"] == []
+    c.delete("/api/decks/listed-test")
+    assert c.get("/api/cards", params={"q": "counterspell", "facets": "false"}).json()["rows"][0]["lots"][0]["qty"] == 3
     c.patch(f"/api/lots/{c.get('/api/cards', params={'q': 'counterspell', 'facets': 'false'}).json()['rows'][0]['lots'][0]['lot_id']}", json={"qty": 1})
     c.delete("/api/decks/split-test")
     # a deck needs only a name: an empty one is filled by hand later

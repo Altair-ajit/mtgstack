@@ -117,6 +117,11 @@ def add(conn: sqlite3.Connection, printing_id: str, qty: int = 1, finish: str = 
         lot_id = left if left is not None else report[-1]["lot_id"]
     if conn.execute("SELECT 1 FROM lots WHERE id=?", (lot_id,)).fetchone():
         lot_id = _merge_into_twin(conn, lot_id)
+    # added straight into a deck: it belongs on that deck's list, or the deck's page does not show it
+    if any(t.startswith("deck:") for t in norm_tags(tags)):
+        from . import decks as _decks
+        oracle = conn.execute("SELECT oracle_id FROM printings WHERE id=?", (printing_id,)).fetchone()[0]
+        _decks.lists_follow(conn, oracle, qty, [], norm_tags(tags))
     log_event(conn, "add", printing_id=printing_id, qty=qty, finish=finish, condition=condition,
               language=language, tags=norm_tags(tags), lot_id=lot_id)
     if commit:
@@ -126,8 +131,10 @@ def add(conn: sqlite3.Connection, printing_id: str, qty: int = 1, finish: str = 
 
 def move(conn: sqlite3.Connection, lot_id: int, qty: int | None = None, add_tags: Iterable[str] | str | None = None,
          remove_tags: Iterable[str] | str | None = None, set_tags: Iterable[str] | str | None = None,
-         condition: str | None = None, commit: bool = True) -> int:
+         condition: str | None = None, commit: bool = True, lists: bool = True) -> int:
     """Take `qty` copies (default: all) out of a lot and give them a new tag set / condition.
+
+    `lists`: deck lists follow the copies' deck tags (see `decks.lists_follow`), whichever way the tags were changed.
 
     Returns the id of the lot that now holds the moved copies.
     """
@@ -156,6 +163,11 @@ def move(conn: sqlite3.Connection, lot_id: int, qty: int | None = None, add_tags
              lot["notes"])).lastrowid
     _set_tags(conn, target, new_tags)
     target = _merge_into_twin(conn, target)
+    if lists and {t for t in old_tags if t.startswith("deck:")} != {t for t in new_tags if t.startswith("deck:")}:
+        from . import decks as _decks
+        oracle = conn.execute("SELECT oracle_id FROM printings WHERE id=?", (lot["printing_id"],)).fetchone()
+        if oracle:
+            _decks.lists_follow(conn, oracle[0], qty, old_tags, new_tags)
     log_event(conn, "move", from_lot=lot_id, to_lot=target, qty=qty, old_tags=old_tags, new_tags=new_tags)
     if commit:
         conn.commit()

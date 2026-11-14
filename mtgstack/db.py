@@ -100,7 +100,9 @@ CREATE TABLE IF NOT EXISTS deck_entries (
     oracle_id   TEXT,
     printing_id TEXT,                            -- optional: a specific printing is wanted
     finish      TEXT,                            -- optional: a specific finish is wanted
-    qty         INTEGER NOT NULL CHECK (qty > 0)
+    qty         INTEGER NOT NULL CHECK (qty > 0),
+    placed      INTEGER NOT NULL DEFAULT 0       -- how many of qty are listed only because copies were put in the deck
+                                                 -- by hand (decks._cover). They leave the list with those copies
 );
 CREATE INDEX IF NOT EXISTS ix_entries_deck ON deck_entries(deck_slug);
 CREATE INDEX IF NOT EXISTS ix_entries_oracle ON deck_entries(oracle_id);
@@ -323,6 +325,9 @@ def add_user_cols(conn: sqlite3.Connection) -> None:
     for col, ddl in (("status", "TEXT NOT NULL DEFAULT 'built'"), ("priority", "INTEGER NOT NULL DEFAULT 100")):
         if have and col not in have:
             conn.execute(f"ALTER TABLE main.decks ADD COLUMN {col} {ddl}")
+    have = {r[1] for r in conn.execute("PRAGMA main.table_info(deck_entries)")}
+    if have and "placed" not in have:
+        conn.execute("ALTER TABLE main.deck_entries ADD COLUMN placed INTEGER NOT NULL DEFAULT 0")
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -335,6 +340,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
     add_cols("decks", [("status", "TEXT NOT NULL DEFAULT 'built'"), ("priority", "INTEGER NOT NULL DEFAULT 100")])
     add_cols("printings", [("image_small", "TEXT")])
+    add_cols("deck_entries", [("placed", "INTEGER NOT NULL DEFAULT 0")])
     # current_prices was introduced after prices; seed it from the newest history row
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name='prices'").fetchone() and \
        not conn.execute("SELECT 1 FROM sqlite_master WHERE name='current_prices'").fetchone():
