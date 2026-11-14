@@ -614,3 +614,8 @@ h1 .rename { font-size: 16px; vertical-align: middle; padding: 2px 6px; } .deck-
   .modal.tall { top: calc(var(--vvtop, 0px) + var(--safe-top) + 6px); bottom: auto; height: calc(var(--vvh, 100dvh) - var(--safe-top) - 6px); max-height: none; border-radius: 16px 16px 0 0; }
   .modal.tall .modal-body { flex: 1; min-height: 0; }
 }
+
+.need-seg { width: 100%; } .need-seg button { flex: 1; justify-content: center; }
+.entry-exact { align-items: flex-start; margin: 0 0 12px; } .entry-exact input { margin-top: 3px; }
+button.primary.danger-fill { background: var(--red); border-color: var(--red); color: #fff; }
+.need-seg { margin: 0 0 10px; }

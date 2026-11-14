@@ -175,10 +175,13 @@ export default function DeckDetail() {
   );
 }
 
-/** One card on the deck's list: how many the deck wants, or off the list altogether. */
+/** One card on the deck's list: how many the deck wants, whether only the listed printing counts, or take some
+ * (or all) of it off the list. */
 function EntryEdit({ slug, e, onClose }: { slug: string; e: Entry; onClose: () => void }) {
   const min = Math.max(1, e.in_deck);
   const [n, setN] = useState(e.wanted);
+  const [exact, setExact] = useState(e.exact);
+  const [removing, setRemoving] = useState<number | null>(null);      // how many to remove, once asked
   const [busy, setBusy] = useState(false);
   const qc = useQueryClient();
   const toast = useToast();
@@ -187,25 +190,54 @@ function EntryEdit({ slug, e, onClose }: { slug: string; e: Entry; onClose: () =
     try { await p; toast(msg); await qc.invalidateQueries(); onClose(); }
     catch (err) { toast(String((err as Error).message), "err"); setBusy(false); }
   };
+  const changed = n !== e.wanted || exact !== e.exact;
+  const save = () => run(api.setEntry(slug, e.entry_id, { ...(n !== e.wanted ? { qty: n } : {}), ...(exact !== e.exact ? { exact } : {}) }), `${e.name} updated`);
+  const copies = (k: number) => `${k} cop${k === 1 ? "y" : "ies"}`;
+  // removing k leaves e.wanted - k wanted; copies in the deck beyond that go back to the collection
+  const back = (k: number) => Math.max(0, e.in_deck - (e.wanted - k));
+  const remove = (k: number) => run(api.removeEntry(slug, e.entry_id, k >= e.wanted ? undefined : k),
+    k >= e.wanted ? `${e.name} is off the deck` : `Removed ${k} ${e.name}`);
   return (
-    <Modal title={e.name} onClose={onClose} footer={<>
+    <Modal title={e.name} onClose={onClose} footer={removing === null ? <>
       <button onClick={onClose}>Cancel</button>
-      <button className="primary" disabled={busy || n === e.wanted} onClick={() => run(api.setEntry(slug, e.entry_id, n), `${e.name}: ${n} wanted`)}>Save</button>
+      <button className="primary" disabled={busy || !changed} onClick={save}>Save</button>
+    </> : <>
+      <button onClick={() => setRemoving(null)}>Back</button>
+      <button className="primary danger-fill" disabled={busy} onClick={() => remove(removing)}>
+        {removing >= e.wanted ? (e.wanted === 1 ? "Remove" : `Remove all ${e.wanted}`) : `Remove ${removing}`}</button>
     </>}>
-      <div className="entry-edit">
-        <div><b>Copies this deck wants</b>
-          <div className="muted small">{e.in_deck} in the deck now{e.to_move ? `, ${e.to_move} to move in` : ""}{e.to_buy ? `, ${e.to_buy} to buy` : ""}</div></div>
-        <div className="stepper" role="group" aria-label="Copies wanted">
-          <button onClick={() => setN(Math.max(min, n - 1))} disabled={n <= min} aria-label="One fewer">−</button>
-          <input inputMode="numeric" value={n} aria-label="Copies wanted" onChange={ev => setN(Math.max(min, Math.min(999, parseInt(ev.target.value, 10) || min)))} />
-          <button onClick={() => setN(Math.min(999, n + 1))} aria-label="One more">+</button>
+      {removing === null ? <>
+        <div className="entry-edit">
+          <div><b>Copies this deck wants</b>
+            <div className="muted small">{e.in_deck} in the deck now{e.to_move ? `, ${e.to_move} to move in` : ""}{e.to_buy ? `, ${e.to_buy} to buy` : ""}</div></div>
+          <div className="stepper" role="group" aria-label="Copies wanted">
+            <button onClick={() => setN(Math.max(min, n - 1))} disabled={n <= min} aria-label="One fewer">−</button>
+            <input inputMode="numeric" value={n} aria-label="Copies wanted" onChange={ev => setN(Math.max(min, Math.min(999, parseInt(ev.target.value, 10) || min)))} />
+            <button onClick={() => setN(Math.min(999, n + 1))} aria-label="One more">+</button>
+          </div>
         </div>
-      </div>
-      {e.in_deck > 1 && n <= min && <p className="muted small">{e.in_deck} copies are in the deck. To want fewer, move a copy out first (↩).</p>}
-      <button className="danger wide-btn" disabled={busy} onClick={() => run(api.removeEntry(slug, e.entry_id),
-        e.in_deck ? `${e.name} is off the deck; ${e.in_deck} cop${e.in_deck === 1 ? "y" : "ies"} back in the collection` : `${e.name} is off the deck`)}>
-        Remove from this deck</button>
-      {e.in_deck > 0 && <p className="muted small">The {e.in_deck === 1 ? "copy" : `${e.in_deck} copies`} in the deck stay{e.in_deck === 1 ? "s" : ""} in your collection.</p>}
+        {e.in_deck > 1 && n <= min && <p className="muted small">{copies(e.in_deck)} are in the deck. To want fewer, use Remove below.</p>}
+        {e.listed_printing_id && (
+          <label className="check entry-exact"><input type="checkbox" checked={exact} onChange={ev => setExact(ev.target.checked)} />
+            <span>Only this printing counts
+              <span className="muted small"> <span className="setcode">{e.set_code.toUpperCase()}</span> #{e.collector_number}{e.listed_finish && e.listed_finish !== "nonfoil" ? `, ${e.listed_finish}` : ""}.
+                {exact ? " Other printings you own will not fill it." : " Off: any printing of the card fills it."}</span></span></label>
+        )}
+        <button className="danger wide-btn" disabled={busy} onClick={() => setRemoving(e.wanted)}>Remove from this deck…</button>
+      </> : <>
+        <div className="entry-edit">
+          <div><b>How many to remove?</b><div className="muted small">The deck wants {e.wanted}; {e.in_deck} {e.in_deck === 1 ? "is" : "are"} in it.</div></div>
+          {e.wanted > 1 ? (
+            <div className="stepper" role="group" aria-label="Copies to remove">
+              <button onClick={() => setRemoving(Math.max(1, removing - 1))} disabled={removing <= 1} aria-label="One fewer">−</button>
+              <input inputMode="numeric" value={removing} aria-label="Copies to remove" onChange={ev => setRemoving(Math.max(1, Math.min(e.wanted, parseInt(ev.target.value, 10) || 1)))} />
+              <button onClick={() => setRemoving(Math.min(e.wanted, removing + 1))} disabled={removing >= e.wanted} aria-label="One more">+</button>
+            </div>
+          ) : <span className="muted small">1 copy</span>}
+        </div>
+        <p className="muted small">{removing >= e.wanted ? "The card comes off this deck's list." : `The deck will want ${e.wanted - removing}.`}
+          {back(removing) > 0 ? ` ${copies(back(removing))} in the deck go${back(removing) === 1 ? "es" : ""} back to your collection.` : e.in_deck > 0 ? " The copies in the deck stay in it." : ""}</p>
+      </>}
     </Modal>
   );
 }

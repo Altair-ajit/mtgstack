@@ -128,6 +128,16 @@ def test_browse_import_and_lot_endpoints(tmp_path):
     assert c.get("/api/decks/listed-test").json()["entries"][0]["wanted"] == 1
     assert c.patch(f"/api/decks/listed-test/entries/{e['entry_id']}", json={"qty": 0}).status_code == 400
     assert c.patch("/api/decks/listed-test/entries/999999", json={"qty": 1}).status_code == 400
+    # a card you still need goes on the list from the deck page; removing asks how many
+    sol = c.get("/api/cards", params={"q": "sol ring", "facets": "false"}).json()["rows"][0]["printing_id"]
+    added = c.post("/api/decks/listed-test/entries", json={"printing_id": sol, "qty": 3, "board": "side"}).json()
+    want = next(x for x in c.get("/api/decks/listed-test").json()["entries"] if x["entry_id"] == added["entry_id"])
+    assert (want["name"], want["board"], want["wanted"], want["exact"]) == ("Sol Ring", "side", 3, False)
+    assert c.patch(f"/api/decks/listed-test/entries/{added['entry_id']}", json={"exact": True}).json() == {"ok": True}
+    assert c.delete(f"/api/decks/listed-test/entries/{added['entry_id']}", params={"qty": 2}).json() == {"returned": 0}
+    assert next(x for x in c.get("/api/decks/listed-test").json()["entries"] if x["entry_id"] == added["entry_id"])["wanted"] == 1
+    assert c.delete(f"/api/decks/listed-test/entries/{added['entry_id']}").json() == {"returned": 0}
+    assert c.post("/api/decks/listed-test/entries", json={"printing_id": "nope"}).status_code == 400
     assert c.delete(f"/api/decks/listed-test/entries/{e['entry_id']}").json() == {"returned": 0}
     assert c.get("/api/decks/listed-test").json()["entries"] == []
     c.delete("/api/decks/listed-test")

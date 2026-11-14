@@ -72,7 +72,15 @@ class Bulk(BaseModel):
 
 
 class EntryPatch(BaseModel):
-    qty: int
+    qty: int | None = None
+    exact: bool | None = None       # only the listed printing counts
+
+
+class EntryAdd(BaseModel):
+    printing_id: str
+    qty: int = 1
+    board: str = "main"
+    exact: bool = False
 
 
 class MoveOne(BaseModel):
@@ -327,13 +335,19 @@ def create_app(db_path: str | None = None, online: bool = True) -> FastAPI:
     @app.patch("/api/decks/{slug}/entries/{entry_id}")
     def api_entry_patch(slug: str, entry_id: int, body: EntryPatch):
         """How many copies of a card the deck's list asks for."""
-        guard(decks.set_entry, conn, slug, entry_id, body.qty)
+        guard(decks.set_entry, conn, slug, entry_id, body.qty, body.exact)
         return {"ok": True}
 
+    @app.post("/api/decks/{slug}/entries")
+    def api_entry_add(slug: str, body: EntryAdd):
+        """Put a card you do not have yet on the deck's list (to buy)."""
+        return {"entry_id": guard(decks.add_entry, conn, slug, body.printing_id, body.qty, body.board, body.exact)}
+
     @app.delete("/api/decks/{slug}/entries/{entry_id}")
-    def api_entry_delete(slug: str, entry_id: int):
-        """Take a card off the deck's list; its copies in the deck go back to the collection."""
-        return {"returned": guard(decks.remove_entry, conn, slug, entry_id)}
+    def api_entry_delete(slug: str, entry_id: int, qty: int | None = None):
+        """Take `qty` copies of a card (default: all) off the deck's list; copies in the deck that the list no longer
+        asks for go back to the collection."""
+        return {"returned": guard(decks.remove_entry, conn, slug, entry_id, qty)}
 
     @app.post("/api/decks/{slug}/pull")
     def api_pull(slug: str, prefer: str = "cheapest", dry_run: bool = False, remove_tags: str = "", q: str = ""):

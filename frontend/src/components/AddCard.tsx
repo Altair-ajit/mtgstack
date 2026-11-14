@@ -15,6 +15,11 @@ export default function AddCard({ onClose, deck: deck0 }: { onClose: () => void;
   const [sel, setSel] = useState<Printing | null>(null);
   const [form, setForm] = useState({ qty: 1, finish: "nonfoil" as Finish, condition: "NM", language: "en", tags: "", deck: deck0 || "", board: "main" });
   const [addedCount, setAddedCount] = useState(0);
+  // adding to a deck: a copy you have (it goes into the collection and the deck), or a card you still need (it goes
+  // on the deck's list only, as one to buy)
+  const [need, setNeed] = useState(false);
+  const [exact, setExact] = useState(false);
+  const wanting = need && !!form.deck;
   const decks = useQuery({ queryKey: ["decks"], queryFn: api.decks });
   const toast = useToast();
   const qc = useQueryClient();
@@ -42,6 +47,15 @@ export default function AddCard({ onClose, deck: deck0 }: { onClose: () => void;
   const add = async (close: boolean) => {
     if (!sel || !picked) return;
     try {
+      if (wanting) {
+        await api.addEntry(form.deck, { printing_id: sel.printing_id, qty: form.qty, board: form.board, exact });
+        toast(`${form.qty}× ${picked.name} on the list, to buy`);
+        qc.invalidateQueries();
+        setAddedCount(n => n + form.qty);
+        if (close) onClose();
+        else { setPicked(null); setSel(null); setPrintings([]); setText(""); }
+        return;
+      }
       const tags = form.tags.split(/[ ,]+/).filter(Boolean);
       if (form.deck) tags.push(form.board === "main" ? `deck:${form.deck}` : `deck:${form.deck}:${form.board}`);
       const r = await api.addLot({ printing_id: sel.printing_id, qty: form.qty, finish: form.finish, condition: form.condition, language: form.language, tags });
@@ -58,7 +72,7 @@ export default function AddCard({ onClose, deck: deck0 }: { onClose: () => void;
       {addedCount > 0 && <span className="muted">{addedCount} added this session</span>}
       <button onClick={onClose}>Done</button>
       <button disabled={!sel} onClick={() => add(false)}>Add &amp; add another</button>
-      <button className="primary" disabled={!sel} onClick={() => add(true)}>Add {form.qty} to {form.deck ? "deck" : "collection"}</button>
+      <button className="primary" disabled={!sel} onClick={() => add(true)}>{wanting ? `Add ${form.qty} to buy` : `Add ${form.qty} to ${form.deck ? "deck" : "collection"}`}</button>
     </>}>
       {!picked ? (
         <div className="ac-wrap">
@@ -82,6 +96,12 @@ export default function AddCard({ onClose, deck: deck0 }: { onClose: () => void;
             <button className="link" onClick={() => { setPicked(null); setSel(null); setPrintings([]); }}>‹ different card</button>
             <h3>{picked.name} <Mana cost={picked.mana_cost} /></h3>
           </div>
+          {form.deck && (
+            <div className="seg need-seg" role="group" aria-label="Do you have this card?">
+              <button className={!need ? "on" : ""} onClick={() => setNeed(false)}>I have it</button>
+              <button className={need ? "on" : ""} onClick={() => setNeed(true)}>Still need it</button>
+            </div>
+          )}
           <div className="add-body">
             <div className="printing-grid">
               {printings.map(p => (
@@ -98,18 +118,20 @@ export default function AddCard({ onClose, deck: deck0 }: { onClose: () => void;
               <div className="add-form">
                 <CardImg src={sel.image_small} name={picked.name} size="md" />
                 <label>Quantity <input type="number" min={1} value={form.qty} onChange={e => setForm({ ...form, qty: Math.max(1, +e.target.value) })} /></label>
-                <label>Printing <select value={form.finish} onChange={e => setForm({ ...form, finish: e.target.value as Finish })}>
-                  {sel.finishes.map(f => <option key={f} value={f}>{FINISH_LABEL[f]}</option>)}</select></label>
-                <label>Condition <select value={form.condition} onChange={e => setForm({ ...form, condition: e.target.value })}>
-                  {Object.entries(COND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-                <label>Language <select value={form.language} onChange={e => setForm({ ...form, language: e.target.value })}>
-                  {Object.entries(LANG_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+                {wanting && <label className="check"><input type="checkbox" checked={exact} onChange={e => setExact(e.target.checked)} /> Only this printing will do</label>}
+                {wanting && <p className="muted small">It goes on the deck's list as a card to buy. Nothing is added to your collection.</p>}
+                {!wanting && <label>Printing <select value={form.finish} onChange={e => setForm({ ...form, finish: e.target.value as Finish })}>
+                  {sel.finishes.map(f => <option key={f} value={f}>{FINISH_LABEL[f]}</option>)}</select></label>}
+                {!wanting && <label>Condition <select value={form.condition} onChange={e => setForm({ ...form, condition: e.target.value })}>
+                  {Object.entries(COND_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>}
+                {!wanting && <label>Language <select value={form.language} onChange={e => setForm({ ...form, language: e.target.value })}>
+                  {Object.entries(LANG_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>}
                 <label>Put in deck <select value={form.deck} onChange={e => setForm({ ...form, deck: e.target.value })}>
                   <option value="">— collection (auto-fills in-progress decks) —</option>
                   {(decks.data || []).map(d => <option key={d.slug} value={d.slug}>{d.name}</option>)}</select></label>
                 {form.deck && <label>Board <select value={form.board} onChange={e => setForm({ ...form, board: e.target.value })}>
                   {["main", "commander", "side", "companion", "maybe"].map(b => <option key={b}>{b}</option>)}</select></label>}
-                <label>Location tag <input placeholder="e.g. binder, box:3" value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} /></label>
+                {!wanting && <label>Location tag <input placeholder="e.g. binder, box:3" value={form.tags} onChange={e => setForm({ ...form, tags: e.target.value })} /></label>}
               </div>
             )}
           </div>

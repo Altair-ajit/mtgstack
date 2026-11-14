@@ -49,6 +49,9 @@ def test_commander_board_and_pinned_finish(conn, cat, deck):
     got = []
     col.add(conn, pid(cat, "Atraxa, Praetors' Voice", "2x2"), 1, finish="foil", allocations=got)
     assert got[0]["tag"] == f"deck:{deck}:commander"
+    # the list names an etched Bolt; that only matters once the card is set to "only this printing"
+    bolt = next(e for e in decks.entries(conn, deck) if e["name"] == "Lightning Bolt")
+    decks.set_entry(conn, deck, bolt["entry_id"], exact=True)
     nope = []
     col.add(conn, pid(cat, "Lightning Bolt", "sta"), 1, finish="foil", allocations=nope)   # deck wants etched
     assert nope == []

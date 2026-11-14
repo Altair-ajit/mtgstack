@@ -42,6 +42,8 @@ export interface Entry {
   card_printing_id: string; image_small: string | null; image_normal: string | null; set_code: string;
   set_name: string; collector_number: string; in_other_decks: string[];
   where: { lot_id: number; qty: number; set: string; finish: string; tags: string }[];
+  /** only the listed printing counts (off: any printing of the card does) */
+  exact: boolean; listed_printing_id: string | null; listed_finish: Finish | null;
   in_deck_lots: { lot_id: number; qty: number; set: string; finish: string; tags: string }[];
   cheapest: { set_code: string; price: number } | null;
 }
@@ -150,9 +152,14 @@ export const api = {
   deckCover: (slug: string) => post<{ slug: string }>(`/api/decks/${slug}/from-tags?keep=true`),
   pull: (slug: string, prefer = "cheapest") => post<{ pulled: { qty: number }[] }>(`/api/decks/${slug}/pull?${qs({ prefer })}`),
   /** how many copies the deck's list asks for */
-  setEntry: (slug: string, entry: number, qty: number) => req("PATCH", `/api/decks/${slug}/entries/${entry}`, { qty }),
-  /** take a card off the deck's list; copies of it in the deck go back to the collection */
-  removeEntry: (slug: string, entry: number) => req("DELETE", `/api/decks/${slug}/entries/${entry}`) as Promise<{ returned: number }>,
+  setEntry: (slug: string, entry: number, b: { qty?: number; exact?: boolean }) => req("PATCH", `/api/decks/${slug}/entries/${entry}`, b),
+  /** take `qty` copies of a card (all of them when left out) off the deck's list; copies in the deck that the list
+   * no longer asks for go back to the collection */
+  removeEntry: (slug: string, entry: number, qty?: number) =>
+    req("DELETE", `/api/decks/${slug}/entries/${entry}${qty ? `?qty=${qty}` : ""}`) as Promise<{ returned: number }>,
+  /** put a card you do not have yet on the deck's list (to buy) */
+  addEntry: (slug: string, b: { printing_id: string; qty: number; board: string; exact: boolean }) =>
+    post<{ entry_id: number }>(`/api/decks/${slug}/entries`, b),
   release: (slug: string) => post(`/api/decks/${slug}/release`),
   exportDeck: (slug: string, fmt: string, source: string) => get<string>(`/api/decks/${slug}/export?${qs({ fmt, source })}`),
   missing: (slug: string) => get<string>(`/api/decks/${slug}/missing`),

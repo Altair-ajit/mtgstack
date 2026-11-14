@@ -101,8 +101,10 @@ CREATE TABLE IF NOT EXISTS deck_entries (
     printing_id TEXT,                            -- optional: a specific printing is wanted
     finish      TEXT,                            -- optional: a specific finish is wanted
     qty         INTEGER NOT NULL CHECK (qty > 0),
-    placed      INTEGER NOT NULL DEFAULT 0       -- how many of qty are listed only because copies were put in the deck
+    placed      INTEGER NOT NULL DEFAULT 0,      -- how many of qty are listed only because copies were put in the deck
                                                  -- by hand (decks._cover). They leave the list with those copies
+    exact       INTEGER NOT NULL DEFAULT 0       -- 1 = only printing_id / finish count for this entry. 0 (the default) =
+                                                 -- any printing of the card does, and printing_id is just the one shown
 );
 CREATE INDEX IF NOT EXISTS ix_entries_deck ON deck_entries(deck_slug);
 CREATE INDEX IF NOT EXISTS ix_entries_oracle ON deck_entries(oracle_id);
@@ -166,27 +168,30 @@ FROM lots l JOIN printings p ON p.id = l.printing_id
 LEFT JOIN current_prices cp ON cp.printing_id = l.printing_id AND cp.finish = l.finish
      AND cp.source = 'tcgplayer' AND cp.kind = 'market';
 
--- One row per decklist entry with card data (from the pinned printing, else the newest English printing) and
+-- One row per decklist entry with card data (from the listed printing, else the newest English printing) and
 -- how it's covered: in_deck = copies tagged into this board; free_qty = matching copies in no deck.
+-- Any printing of the card counts, unless the entry is `exact`: then only its printing / finish do. The columns
+-- printing_id and finish are that requirement (NULL when any will do); listed_* are what the list named.
 CREATE VIEW entry_base AS
 SELECT e.id AS entry_id, e.deck_slug, d.name AS deck_name, d.status AS deck_status, e.board, e.card_name AS name,
-       e.qty AS wanted, e.oracle_id, e.printing_id, e.finish,
+       e.qty AS wanted, e.oracle_id, CASE WHEN e.exact = 1 THEN e.printing_id END AS printing_id,
+       CASE WHEN e.exact = 1 THEN e.finish END AS finish, e.exact, e.printing_id AS listed_printing_id, e.finish AS listed_finish,
        c.id AS card_printing_id, c.type_line, c.oracle_text, c.mana_cost, c.cmc, c.colors, c.color_identity,
        c.rarity, c.legalities, c.set_code, c.set_name, c.collector_number, c.released_at, c.image_small, c.image_normal,
        CASE e.board WHEN 'main' THEN 'deck:' || e.deck_slug ELSE 'deck:' || e.deck_slug || ':' || e.board END AS board_tag,
        (SELECT COALESCE(SUM(l.qty), 0) FROM lots l JOIN printings p ON p.id = l.printing_id
-         WHERE (p.id = e.printing_id OR (e.printing_id IS NULL AND p.oracle_id = e.oracle_id))
-           AND (e.finish IS NULL OR l.finish = e.finish)
+         WHERE ((e.exact = 1 AND p.id = e.printing_id) OR ((e.exact = 0 OR e.printing_id IS NULL) AND p.oracle_id = e.oracle_id))
+           AND (e.exact = 0 OR e.finish IS NULL OR l.finish = e.finish)
            AND EXISTS (SELECT 1 FROM lot_tags t WHERE t.lot_id = l.id AND t.tag =
                 CASE e.board WHEN 'main' THEN 'deck:' || e.deck_slug ELSE 'deck:' || e.deck_slug || ':' || e.board END)) AS in_deck,
        (SELECT COALESCE(SUM(l.qty), 0) FROM lots l JOIN printings p ON p.id = l.printing_id
-         WHERE (p.id = e.printing_id OR (e.printing_id IS NULL AND p.oracle_id = e.oracle_id))
-           AND (e.finish IS NULL OR l.finish = e.finish)
+         WHERE ((e.exact = 1 AND p.id = e.printing_id) OR ((e.exact = 0 OR e.printing_id IS NULL) AND p.oracle_id = e.oracle_id))
+           AND (e.exact = 0 OR e.finish IS NULL OR l.finish = e.finish)
            AND NOT EXISTS (SELECT 1 FROM lot_tags t WHERE t.lot_id = l.id AND t.tag LIKE 'deck:%')) AS free_qty,
        (SELECT MIN(cp.price) FROM printings q JOIN current_prices cp ON cp.printing_id = q.id
          AND cp.source = 'tcgplayer' AND cp.kind = 'market'
-         WHERE (q.id = e.printing_id OR (e.printing_id IS NULL AND q.oracle_id = e.oracle_id))
-           AND (e.finish IS NULL OR cp.finish = e.finish) AND q.lang = 'en') AS price
+         WHERE ((e.exact = 1 AND q.id = e.printing_id) OR ((e.exact = 0 OR e.printing_id IS NULL) AND q.oracle_id = e.oracle_id))
+           AND (e.exact = 0 OR e.finish IS NULL OR cp.finish = e.finish) AND q.lang = 'en') AS price
 FROM deck_entries e
 JOIN decks d ON d.slug = e.deck_slug
 LEFT JOIN printings c ON c.id = COALESCE(e.printing_id,
@@ -326,8 +331,9 @@ def add_user_cols(conn: sqlite3.Connection) -> None:
         if have and col not in have:
             conn.execute(f"ALTER TABLE main.decks ADD COLUMN {col} {ddl}")
     have = {r[1] for r in conn.execute("PRAGMA main.table_info(deck_entries)")}
-    if have and "placed" not in have:
-        conn.execute("ALTER TABLE main.deck_entries ADD COLUMN placed INTEGER NOT NULL DEFAULT 0")
+    for col in ("placed", "exact"):
+        if have and col not in have:
+            conn.execute(f"ALTER TABLE main.deck_entries ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -340,7 +346,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
     add_cols("decks", [("status", "TEXT NOT NULL DEFAULT 'built'"), ("priority", "INTEGER NOT NULL DEFAULT 100")])
     add_cols("printings", [("image_small", "TEXT")])
-    add_cols("deck_entries", [("placed", "INTEGER NOT NULL DEFAULT 0")])
+    add_cols("deck_entries", [("placed", "INTEGER NOT NULL DEFAULT 0"), ("exact", "INTEGER NOT NULL DEFAULT 0")])
     # current_prices was introduced after prices; seed it from the newest history row
     if conn.execute("SELECT 1 FROM sqlite_master WHERE name='prices'").fetchone() and \
        not conn.execute("SELECT 1 FROM sqlite_master WHERE name='current_prices'").fetchone():

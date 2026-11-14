@@ -44,7 +44,16 @@ def test_import_reconcile_pull_release_export(conn, cat):
     assert r["slug"] == "atraxa-superfriends" and not r["unresolved"]
     rep = {e["name"]: e for e in decks.reconcile(conn, r["slug"])["entries"]}
     assert rep["Sol Ring"]["free_available"] == 2 and rep["Sol Ring"]["in_other_decks"] == ["deck:other"]
-    assert rep["Lightning Bolt"]["missing"] == 1          # only own a foil, deck wants etched
+    # the list names an etched STA Bolt and you own a foil one: any printing of the card counts...
+    assert (rep["Lightning Bolt"]["missing"], rep["Lightning Bolt"]["exact"]) == (0, False)
+    assert rep["Lightning Bolt"]["listed_finish"] == "etched" and rep["Lightning Bolt"]["set_code"] == "sta"
+    # ...until the card is set to want exactly the printing listed
+    decks.set_entry(conn, r["slug"], rep["Lightning Bolt"]["entry_id"], exact=True)
+    rep = {e["name"]: e for e in decks.reconcile(conn, r["slug"])["entries"]}
+    assert (rep["Lightning Bolt"]["missing"], rep["Lightning Bolt"]["finish"]) == (1, "etched")
+    import pytest
+    with pytest.raises(ValueError):                         # a card listed by name only has no printing to insist on
+        decks.set_entry(conn, r["slug"], rep["Arcane Signet"]["entry_id"], exact=True)
     assert rep["Arcane Signet"]["missing"] == 1 and rep["Arcane Signet"]["cheapest"]["price"] == 0.60
     assert rep["Island"]["missing"] == 6
 
@@ -147,15 +156,49 @@ def test_what_a_decklist_asks_for_stays_when_copies_come_and_go(conn, cat):
     assert {(e["name"], e["board"]): e["wanted"] for e in decks.reconcile(conn, slug)["entries"]} == listed
 
 
+def test_wanted_cards_can_be_added_and_removed_a_few_at_a_time(conn, cat):
+    """A card you do not own goes on a deck's list as one to buy. Removing takes a count: some of them, or all;
+    copies in the deck that the list no longer asks for go back to the collection."""
+    slug = decks.create_deck(conn, "Wants", "commander", status="built")
+    eid = decks.add_entry(conn, slug, pid(cat, "Counterspell", "dmr"), 4)
+    assert decks.add_entry(conn, slug, pid(cat, "Counterspell", "mh2"), 1) == eid       # the same card: one row, 5 wanted
+    e = decks.reconcile(conn, slug)["entries"][0]
+    assert (e["name"], e["wanted"], e["to_buy"], e["exact"], e["set_code"]) == ("Counterspell", 5, 5, False, "dmr")
+    assert conn.execute("SELECT COUNT(*) FROM lots").fetchone()[0] == 0                 # nothing entered the collection
+    assert decks.remove_entry(conn, slug, eid, 2) == 0
+    assert decks.reconcile(conn, slug)["entries"][0]["wanted"] == 3
+    # two copies in the deck, three wanted: removing two keeps one wanted, so one copy goes back
+    lot = col.add(conn, pid(cat, "Counterspell", "mh2"), 2, auto_allocate=False)
+    decks.send(conn, lot, None, slug)
+    assert decks.remove_entry(conn, slug, eid, 2) == 1
+    e = decks.reconcile(conn, slug)["entries"][0]
+    assert (e["wanted"], e["in_deck"]) == (1, 1) and sum(l["qty"] for l in query(conn, "counterspell is:free")) == 1
+    assert decks.remove_entry(conn, slug, eid) == 1                                     # all of it
+    assert decks.reconcile(conn, slug)["entries"] == [] and query(conn, "deck:wants") == []
+    # an exact want is a row of its own; bad input is refused
+    x = decks.add_entry(conn, slug, pid(cat, "Sol Ring", "cmm"), 1, board="side", exact=True)
+    assert decks.add_entry(conn, slug, pid(cat, "Sol Ring", "c21"), 1, board="side", exact=True) != x
+    import pytest
+    for bad in (lambda: decks.add_entry(conn, slug, "no-such-printing"), lambda: decks.add_entry(conn, slug, pid(cat, "Sol Ring", "cmm"), 0),
+                lambda: decks.add_entry(conn, slug, pid(cat, "Sol Ring", "cmm"), 1, board="nope"), lambda: decks.remove_entry(conn, slug, x, 0)):
+        with pytest.raises((KeyError, ValueError)):
+            bad()
+
+
 def test_another_printing_than_the_list_names_still_shows_in_the_deck(conn, cat):
-    """A list imported with set codes asks for exact printings. A copy of another printing put in the deck is not
-    counted by that entry, so it gets one of its own: it must not be in the deck and missing from its page."""
+    """A card on a list can be set to want exactly the printing named. A copy of another printing put in the deck is
+    then not counted by that entry, so it gets one of its own: it must not be in the deck and missing from its page."""
     slug = decks.create_deck(conn, "Exact", "commander", status="built")
     sol = conn.execute("SELECT oracle_id FROM printings WHERE id=?", (pid(cat, "Sol Ring", "cmm"),)).fetchone()[0]
     conn.execute("INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, printing_id, qty) VALUES (?,?,?,?,?,?)",
                  (slug, "main", "Sol Ring", sol, pid(cat, "Sol Ring", "cmm"), 1))
     other = col.add(conn, pid(cat, "Sol Ring", "c21"), 1, auto_allocate=False)
     decks.send(conn, other, None, slug)
+    # by default any printing counts: the C21 copy is the Sol Ring the list asked for
+    only = decks.reconcile(conn, slug)["entries"]
+    assert [(e["wanted"], e["in_deck"], e["status"]) for e in only] == [(1, 1, "owned")]
+    # switched to "only this printing", the C21 copy no longer counts for it, and keeps a row of its own
+    decks.set_entry(conn, slug, only[0]["entry_id"], exact=True)
     rows = sorted((e["printing_id"] or "", e["wanted"], e["in_deck"]) for e in decks.reconcile(conn, slug)["entries"])
     assert rows == [("", 1, 1), (pid(cat, "Sol Ring", "cmm"), 1, 0)]
     assert decks.reconcile(conn, slug)["totals"]["in_deck"] == 1

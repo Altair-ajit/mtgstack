@@ -158,7 +158,7 @@ def _cover(conn, slug: str, fresh: bool = False, oracle_id: str | None = None) -
     them. `_uncover` takes it off again when those copies leave, so a card moved in and back out is not left
     behind as one "to buy".
 
-    An entry may ask for one printing or finish (a list imported with set codes). Copies of another printing in the
+    An entry may ask for one printing or finish (`exact`, switched on per card). Copies of another printing in the
     deck are not counted by it, so they get an entry of their own (any printing): otherwise they would be in the
     deck and nowhere on its page."""
     from . import db
@@ -176,7 +176,8 @@ def _cover(conn, slug: str, fresh: bool = False, oracle_id: str | None = None) -
         for oid, c in tagged.items():
             total = sum(q for _, _, q in c["lots"])
             listed = [] if fresh else conn.execute(
-                "SELECT id, printing_id, finish, qty FROM deck_entries WHERE deck_slug=? AND board=? AND oracle_id=? ORDER BY id",
+                "SELECT id, CASE WHEN exact = 1 THEN printing_id END printing_id, CASE WHEN exact = 1 THEN finish END finish, "
+                "qty FROM deck_entries WHERE deck_slug=? AND board=? AND oracle_id=? ORDER BY id",
                 (slug, board, oid)).fetchall()
             anyp = [e for e in listed if not e["printing_id"] and not e["finish"]]
             # copies the entries for one printing/finish account for; the rest need an any-printing entry
@@ -229,34 +230,79 @@ def _entry(conn, slug: str, entry_id: int) -> dict:
     return e
 
 
-def set_entry(conn, slug: str, entry_id: int, qty: int) -> None:
-    """Change how many copies of a card the deck's list asks for."""
+def set_entry(conn, slug: str, entry_id: int, qty: int | None = None, exact: bool | None = None) -> None:
+    """Change how many copies of a card the deck's list asks for, or whether only the listed printing counts."""
     e = _entry(conn, slug, entry_id)
-    if not 1 <= qty <= 999:
-        raise ValueError("the count must be between 1 and 999")
-    if qty < e["in_deck"]:
-        raise ValueError(f"{e['in_deck']} cop{'y is' if e['in_deck'] == 1 else 'ies are'} in the deck: move some out first")
-    conn.execute("UPDATE deck_entries SET qty=?, placed=0 WHERE id=?", (qty, entry_id))    # now asked for, not just there
-    log_event(conn, "deck_entry", slug=slug, entry_id=entry_id, qty=qty)
+    if qty is not None:
+        if not 1 <= qty <= 999:
+            raise ValueError("the count must be between 1 and 999")
+        if qty < e["in_deck"]:
+            raise ValueError(f"{e['in_deck']} cop{'y is' if e['in_deck'] == 1 else 'ies are'} in the deck: remove some first")
+        conn.execute("UPDATE deck_entries SET qty=?, placed=0 WHERE id=?", (qty, entry_id))    # now asked for, not just there
+    if exact is not None:
+        if exact and not e["listed_printing_id"]:
+            raise ValueError("this card has no printing named on the list")
+        conn.execute("UPDATE deck_entries SET exact=? WHERE id=?", (1 if exact else 0, entry_id))
+        _cover(conn, slug, oracle_id=e["oracle_id"])      # copies of other printings in the deck stay on its page
+    log_event(conn, "deck_entry", slug=slug, entry_id=entry_id, qty=qty, exact=exact)
     conn.commit()
 
 
-def remove_entry(conn, slug: str, entry_id: int) -> int:
-    """Take a card off the deck's list. Copies of it that are in the deck go back to the collection (they would
-    put it back on the list otherwise). Returns how many copies went back."""
+def remove_entry(conn, slug: str, entry_id: int, qty: int | None = None) -> int:
+    """Take `qty` copies of a card (default: all of them) off the deck's list. Copies in the deck beyond what the list
+    still asks for go back to the collection (they would put the card back on the list otherwise). Returns how many
+    copies went back."""
     e = _entry(conn, slug, entry_id)
+    if qty is not None and qty <= 0:
+        raise ValueError("remove at least one")
+    keep = 0 if qty is None else max(0, e["wanted"] - qty)
     back = 0
     try:
+        over = e["in_deck"] - keep
         for lot in _lots_for(conn, e, _has_tag("x.tag = ?"), [e["board_tag"]]):
-            col.move(conn, lot["lot_id"], remove_tags=[e["board_tag"]], commit=False)
-            back += lot["qty"]
-        conn.execute("DELETE FROM deck_entries WHERE id=?", (entry_id,))
-        log_event(conn, "deck_entry_remove", slug=slug, name=e["name"], returned=back)
+            if over <= 0:
+                break
+            n = min(over, lot["qty"])
+            col.move(conn, lot["lot_id"], n, remove_tags=[e["board_tag"]], commit=False, lists=False)
+            back += n
+            over -= n
+        if keep:
+            conn.execute("UPDATE deck_entries SET qty=?, placed=MIN(placed, ?) WHERE id=?", (keep, keep, entry_id))
+        else:
+            conn.execute("DELETE FROM deck_entries WHERE id=?", (entry_id,))
+        log_event(conn, "deck_entry_remove", slug=slug, name=e["name"], removed=e["wanted"] - keep, returned=back)
         conn.commit()
     except Exception:
         conn.rollback()
         raise
     return back
+
+
+def add_entry(conn, slug: str, printing_id: str, qty: int = 1, board: str = "main", exact: bool = False) -> int:
+    """Put a card you do not have yet on the deck's list (it shows as to buy, or to move if a copy is free in the
+    collection). `exact`: only this printing will do. Returns the entry's id."""
+    if not conn.execute("SELECT 1 FROM decks WHERE slug=?", (slug,)).fetchone():
+        raise KeyError(f"no deck {slug}")
+    if board not in BOARDS:
+        raise ValueError(f"board must be one of {BOARDS}")
+    if not 1 <= qty <= 999:
+        raise ValueError("the count must be between 1 and 999")
+    p = conn.execute("SELECT id, name, oracle_id FROM printings WHERE id=?", (printing_id,)).fetchone()
+    if not p:
+        raise KeyError(f"unknown printing {printing_id}")
+    same = conn.execute("SELECT id FROM deck_entries WHERE deck_slug=? AND board=? AND oracle_id=? AND exact=? "
+                        "AND (exact = 0 OR printing_id = ?) ORDER BY id LIMIT 1",
+                        (slug, board, p["oracle_id"], 1 if exact else 0, printing_id)).fetchone()
+    if same:
+        conn.execute("UPDATE deck_entries SET qty = qty + ? WHERE id=?", (qty, same[0]))
+        entry_id = same[0]
+    else:
+        entry_id = conn.execute(
+            "INSERT INTO deck_entries(deck_slug, board, card_name, oracle_id, printing_id, qty, exact) VALUES (?,?,?,?,?,?,?)",
+            (slug, board, p["name"], p["oracle_id"], printing_id, qty, 1 if exact else 0)).lastrowid
+    log_event(conn, "deck_entry_add", slug=slug, name=p["name"], qty=qty, board=board, exact=exact)
+    conn.commit()
+    return entry_id
 
 
 def cover_all(conn) -> int:
@@ -335,6 +381,7 @@ def reconcile(conn, slug: str, q: str = "") -> dict:
                "type_line": e["type_line"], "mana_cost": e["mana_cost"], "cmc": e["cmc"], "colors": e["colors"],
                "rarity": e["rarity"], "price": e["price"], "printing_id": e["printing_id"], "finish": e["finish"],
                "oracle_id": e["oracle_id"], "entry_id": e["entry_id"], "in_other_decks": [], "where": [],
+               "exact": bool(e["exact"]), "listed_printing_id": e["listed_printing_id"], "listed_finish": e["listed_finish"],
                "card_printing_id": e["card_printing_id"], "image_small": e["image_small"],
                "image_normal": e["image_normal"], "set_code": e["set_code"], "set_name": e["set_name"],
                "collector_number": e["collector_number"],
