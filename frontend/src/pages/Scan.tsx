@@ -72,16 +72,29 @@ export default function Scan() {
   useEffect(() => () => stream?.getTracks().forEach(t => t.stop()), [stream]);
   useEffect(() => { localStorage.setItem("mtg.scan.batch", JSON.stringify(items)); }, [items]);
 
+  // The camera starts by itself when the screen opens. `camErr` is why it is not running (shown in its place, with
+  // a way to try again: a refused permission, or a camera another app holds, cannot be retried for the user).
+  const [camErr, setCamErr] = useState("");
+  const here = useRef(true);
   const start = async () => {
     if (!navigator.mediaDevices?.getUserMedia) {
-      toast("The live camera needs HTTPS on a phone — run ./run.sh --phone, or use Upload photo.", "err"); return;
+      setCamErr("The live camera needs HTTPS on a phone: run ./run.sh --phone, or use Upload."); return;
     }
+    setCamErr("");
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1440 } } });
+      if (!here.current) { s.getTracks().forEach(t => t.stop()); return; }      // left the screen while it was starting
+      s.getVideoTracks()[0]?.addEventListener("ended", () => { if (here.current) { setStream(null); setCamErr("The camera stopped."); } });
       setStream(s);
       if (video.current) video.current.srcObject = s;
-    } catch (e) { toast(String((e as Error).message), "err"); }
+    } catch (e) {
+      if (!here.current) return;
+      const err = e as Error;
+      setCamErr(err.name === "NotAllowedError" ? "The camera is not allowed. Allow it for this app in your settings, then try again."
+        : err.name === "NotFoundError" ? "No camera found." : String(err.message || err));
+    }
   };
+  useEffect(() => { here.current = true; start(); return () => { here.current = false; }; }, []); // eslint-disable-line
 
   // One canvas per size, reused: the tracker grabs a frame several times a second, and phones (iOS above all) cap
   // the memory of all live canvases. Past the cap new ones silently draw blank, i.e. "no card" for ever.
@@ -300,7 +313,9 @@ export default function Scan() {
                 <span>✓ <b>{items[0].name}</b> {items[0].set_code.toUpperCase()} · {money(itemPrice(items[0]))}</span>
                 <span className="n">{count} cards · {money(value)}</span></div>}
               {stream && (busy || hint) && <div className={`cam-hint ${busy ? "busy" : ""}`}>{busy ? "Reading the card…" : hint}</div>}
-              {!stream && <div className="cam-off"><button className="primary" onClick={start}>Start camera</button><div className="muted small">or upload a photo below</div></div>}
+              {!stream && (camErr
+                ? <div className="cam-off"><div className="cam-err">{camErr}</div><button onClick={start}>Try again</button><div className="muted small">or upload a photo below</div></div>
+                : <div className="cam-off"><div className="muted">Starting the camera…</div></div>)}
             </div>
             <div className="cam-bar">
               <label className="btn cam-side">Upload<span className="not-phone">&nbsp;photo</span><input type="file" accept="image/*" capture="environment" multiple hidden onChange={e => e.target.files && send([...e.target.files])} /></label>
